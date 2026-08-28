@@ -1,10 +1,12 @@
 get_home_program:
+  # Only an entity filter. A `device:` filter under `target:` is rejected by
+  # hassfest ("services do not support device filters on target") and is not
+  # needed: the target picker already offers devices and areas, narrowed to
+  # those holding a matching entity. No core service uses one.
   target:
     entity:
       integration: eb300_ble
       domain: climate
-    device:
-      integration: eb300_ble
   fields: {}
 
 # Two ways in, both optional and combinable:
@@ -20,12 +22,14 @@ get_home_program:
 # Declaring `fields` also swaps the raw-YAML box for a real per-event editor
 # (time picker + temperature box), which is what makes the field usable at all.
 set_home_program:
+  # Only an entity filter. A `device:` filter under `target:` is rejected by
+  # hassfest ("services do not support device filters on target") and is not
+  # needed: the target picker already offers devices and areas, narrowed to
+  # those holding a matching entity. No core service uses one.
   target:
     entity:
       integration: eb300_ble
       domain: climate
-    device:
-      integration: eb300_ble
   fields:
     days:
       example: "[monday, tuesday, wednesday, thursday, friday]"

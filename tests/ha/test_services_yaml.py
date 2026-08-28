@@ -104,10 +104,24 @@ def test_example_matches_what_the_selector_accepts(day):
     assert sel(json.loads(DAY_FIELDS[day]["example"]))
 
 
-def test_targets_allow_both_entity_and_device():
+def test_targets_filter_on_entity_only():
+    """`target:` must carry an entity filter and NOT a device filter.
+
+    A `device:` filter here reads like the way to make the device picker offer
+    the thermostat, and it is not: hassfest rejects it outright ("services do
+    not support device filters on target, use a device selector instead"), and
+    zero of the ~490 target blocks in HA core use one.
+
+    Device targets still work. The picker offers devices and areas regardless,
+    narrowed to those holding a matching entity -- exactly like `light.turn_on`,
+    whose target is nothing but `entity: domain: light`. What actually made
+    device targets work is the service schema accepting them and
+    `_resolve_coordinator` expanding them; see test_resolve.py.
+    """
     for svc in ("get_home_program", "set_home_program"):
         target = SERVICES[svc]["target"]
-        assert "entity" in target and "device" in target, svc
+        assert "entity" in target, svc
+        assert "device" not in target, svc
 
 
 def test_home_assistant_own_yaml_loader_parses_it():

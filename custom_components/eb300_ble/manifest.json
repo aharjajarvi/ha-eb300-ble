@@ -1,11 +1,11 @@
 {
   "domain": "eb300_ble",
   "name": "Ebeco EB-Therm 300 (BLE)",
-  "codeowners": ["@aharjajarvi"],
   "bluetooth": [
     { "manufacturer_id": 3987 },
     { "service_uuid": "ebec0ebe-2000-478c-b320-d88b98a9ba80" }
   ],
+  "codeowners": ["@aharjajarvi"],
   "config_flow": true,
   "dependencies": ["bluetooth_adapters"],
   "documentation": "https://github.com/aharjajarvi/ha-eb300-ble",
