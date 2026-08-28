@@ -1,0 +1,38 @@
+ha-eb300-ble — third-party attributions
+=======================================
+
+Protocol
+--------
+This integration implements the Ebeco EB300 Open Local API, Rev 1.0
+(2026-03-27).
+
+    Source: Ebeco AB
+    https://www.ebeco.com/en/solutions/underfloor-heating/ebeco-open-api
+
+Ebeco's terms for material provided via their Open APIs require that Ebeco is
+stated as the source. This project does not redistribute their document; refer
+to the URL above for the wire format. Ebeco also notes that available features
+and commands vary by product model and firmware version, and that some
+functions are reserved for Ebeco's own applications and backend.
+
+Icon
+----
+custom_components/eb300_ble/brand/icon.png and icon@2x.png are rendered from
+the "thermostat" glyph of Material Design Icons by Pictogrammers, used under
+the Pictogrammers Free License.
+
+    https://pictogrammers.com/library/mdi/icon/thermostat/
+    https://pictogrammers.com/docs/general/license/
+
+Trademarks
+----------
+"Ebeco" and "EB-Therm" are trademarks of Ebeco AB. This project is an
+independent, community-maintained integration. It is not affiliated with,
+endorsed by, sponsored by, or supported by Ebeco AB. Product names are used
+only to identify the hardware this software talks to.
+
+Home Assistant
+--------------
+This is a custom integration. It is not part of Home Assistant core and is not
+endorsed by the Home Assistant project. It deliberately does not use any
+Home Assistant branded imagery.

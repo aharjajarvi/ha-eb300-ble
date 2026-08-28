@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lib:
+    name: Library suite (no Home Assistant)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: pytest
+        working-directory: tests/lib
+        run: uv run pytest -q
+      - name: ruff
+        run: uv run --project tests/lib ruff check .
+      - name: mypy
+        run: uv run --project tests/lib mypy
+
+  ha:
+    name: Home Assistant suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: pytest
+        # run.sh stages the component under an importable name first.
+        run: ./tests/ha/run.sh -q

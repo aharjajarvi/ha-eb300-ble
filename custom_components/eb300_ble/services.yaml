@@ -1,0 +1,91 @@
+get_home_program:
+  target:
+    entity:
+      integration: eb300_ble
+      domain: climate
+    device:
+      integration: eb300_ble
+  fields: {}
+
+# Two ways in, both optional and combinable:
+#   - `days` + `events`  — one event list applied to several weekdays at once,
+#     which is what almost every real edit looks like ("the five weekdays alike").
+#   - the per-weekday fields in the collapsed section — for days that differ.
+# A day may not be named both ways in one call; the handler rejects that rather
+# than silently picking a winner.
+#
+# Each weekday is a *list* of up to 4 events, so every day field needs
+# `multiple: true` — an object selector defaults to `multiple: false`, which
+# rejects a list outright and leaves the UI with no way to enter one.
+# Declaring `fields` also swaps the raw-YAML box for a real per-event editor
+# (time picker + temperature box), which is what makes the field usable at all.
+set_home_program:
+  target:
+    entity:
+      integration: eb300_ble
+      domain: climate
+    device:
+      integration: eb300_ble
+  fields:
+    days:
+      example: "[monday, tuesday, wednesday, thursday, friday]"
+      selector:
+        select:
+          multiple: true
+          options:
+            - { label: Monday, value: monday }
+            - { label: Tuesday, value: tuesday }
+            - { label: Wednesday, value: wednesday }
+            - { label: Thursday, value: thursday }
+            - { label: Friday, value: friday }
+            - { label: Saturday, value: saturday }
+            - { label: Sunday, value: sunday }
+    events: &day
+      example: '[{"time": "06:00", "temperature": 22.0}, {"time": "22:00", "temperature": 17.0}]'
+      selector:
+        object:
+          multiple: true
+          label_field: time
+          description_field: temperature
+          fields:
+            time:
+              label: Time
+              required: true
+              selector:
+                time:
+            temperature:
+              label: Temperature
+              required: true
+              selector:
+                number:
+                  # Device limits: 5.0-35.0 C in 0.5 C steps (one s8 unit = 5
+                  # decidegrees). Matching them here means the UI cannot submit
+                  # a value the device would reject.
+                  min: 5
+                  max: 35
+                  step: 0.5
+                  unit_of_measurement: "°C"
+                  mode: box
+            # Not optional decoration: this is the only way to switch a slot
+            # off. The device always holds 4 slots per day, and an inactive one
+            # still needs a valid in-order time, so a slot is disabled by
+            # clearing this — never by blanking the time. It also has to be
+            # listed here for `get_home_program` output to paste straight back
+            # in: the object selector rejects any key it does not declare.
+            active:
+              label: Active
+              required: false
+              selector:
+                boolean:
+    # A section is UI grouping only — the frontend still submits these as
+    # top-level keys, so the service schema stays flat.
+    per_day:
+      collapsed: true
+      fields:
+        monday: *day
+        tuesday: *day
+        wednesday: *day
+        thursday: *day
+        friday: *day
+        saturday: *day
+        sunday: *day

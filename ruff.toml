@@ -1,0 +1,7 @@
+# Repo-wide lint config, so `ruff check .` from the root covers the component,
+# the tests and the hardware tools in one pass.
+#
+# extend-exclude, not exclude: plain `exclude` REPLACES ruff's defaults, which
+# would send it walking into .venv and tests/ha/.stage.
+line-length = 110
+extend-exclude = ["tests/ha/.stage"]

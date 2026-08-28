@@ -1,0 +1,31 @@
+# Offline suite for the vendored BLE library. Deliberately has NO `homeassistant`
+# dependency: the library must stay usable — and testable — without HA installed.
+#
+# There is no second copy of the library to test against. `pythonpath` points at
+# the code that actually ships inside the component, so a passing run here says
+# something about the deployed artifact rather than about a parallel source tree.
+[project]
+name = "eb300-ble-lib-tests"
+version = "0"
+requires-python = ">=3.12"
+dependencies = [
+    "bleak>=3.0.2",
+    "bleak-retry-connector>=4.6.3",
+    "cryptography>=50.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["../../custom_components/eb300_ble"]

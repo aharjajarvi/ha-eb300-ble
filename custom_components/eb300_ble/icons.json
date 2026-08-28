@@ -1,0 +1,36 @@
+{
+  "entity": {
+    "sensor": {
+      "program": { "default": "mdi:calendar-clock" },
+      "heating_time": { "default": "mdi:radiator" },
+      "time_to_target": { "default": "mdi:timer-sand" }
+    },
+    "binary_sensor": {
+      "limited_by_limiting_sensor": {
+        "default": "mdi:thermometer-off",
+        "state": { "on": "mdi:thermometer-alert" }
+      }
+    },
+    "switch": {
+      "key_lock": {
+        "default": "mdi:lock-open-variant",
+        "state": { "on": "mdi:lock" }
+      }
+    },
+    "select": {
+      "language": { "default": "mdi:translate" },
+      "screensaver_type": { "default": "mdi:monitor-dashboard" }
+    },
+    "number": {
+      "room_calibration": { "default": "mdi:home-thermometer" },
+      "floor_calibration": { "default": "mdi:heating-coil" }
+    },
+    "button": {
+      "sync_clock": { "default": "mdi:clock-check-outline" }
+    }
+  },
+  "services": {
+    "get_home_program": "mdi:calendar-export",
+    "set_home_program": "mdi:calendar-edit"
+  }
+}

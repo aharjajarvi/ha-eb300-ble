@@ -1,0 +1,33 @@
+# Separate from tests/lib on purpose: this suite needs a real `homeassistant`
+# package (and the Python version HA itself requires), which the library suite
+# must not depend on.
+#
+# PIN THIS FORWARD ON EVERY HOME ASSISTANT UPGRADE. Import paths and selector
+# semantics move between HA releases, and that is exactly what has broken this
+# integration at load time before — `helpers.service` -> `helpers.target` cost
+# three failed deploys. Set the pin to whatever the target instance runs
+# (Settings -> About), then re-run this suite.
+[project]
+name = "eb300-ble-ha-tests"
+version = "0"
+requires-python = ">=3.14.2"
+dependencies = [
+    "homeassistant==2026.8.1",
+    "pytest-homeassistant-custom-component",
+    "bleak-retry-connector>=4.6.3",
+    # pulled in by homeassistant.components.bluetooth's import chain
+    "aiousbwatcher",
+    "bluetooth-adapters",
+    "habluetooth",
+    "serialx",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::pytest.PytestRemovedIn9Warning",
+    "ignore::DeprecationWarning",
+]

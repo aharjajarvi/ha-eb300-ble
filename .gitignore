@@ -1,0 +1,30 @@
+# Device credentials — never commit these
+psk.txt
+*.psk
+secrets*.txt
+test device key.txt
+
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+.stage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Hardware bring-up artifacts (btsnoop captures, poll/soak logs, snapshots)
+*.btsnoop
+*.jsonl
+tools/snapshots/
+
+# Editor / agent runtime state
+.claude/
+.idea/
+.vscode/

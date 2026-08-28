@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if the thermostat is never discovered, or setup fails at
+        the PSK step, check first that an **Open API PSK is provisioned** on the
+        device. Without it the handshake cannot succeed, and that is not a bug
+        in this integration. See the README's "Getting a PSK" section.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.8.1"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: radio
+    attributes:
+      label: How does Home Assistant reach the thermostat?
+      options:
+        - Built-in Bluetooth adapter
+        - ESPHome Bluetooth proxy
+        - Both / not sure
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Thermostat firmware and batch
+      description: Shown on the device page, or in the diagnostics download.
+      placeholder: "firmware 1.2, batch 2603"
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Settings -> System -> Logs, filtered to `eb300_ble`. For more detail add
+        this to configuration.yaml and restart:
+        `logger: logs: custom_components.eb300_ble: debug`
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Device page -> three-dot menu -> Download diagnostics. The PSK is
+        redacted automatically. Paste or attach the JSON.
+      render: json

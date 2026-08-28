@@ -1,0 +1,30 @@
+name: Validate
+
+# The nightly run is the point of this workflow, not a nicety. Home Assistant
+# moves helper import paths between releases, and this integration has already
+# failed to load three times because of it. A scheduled hassfest run turns that
+# from "a user's HA won't start" into a red build here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration

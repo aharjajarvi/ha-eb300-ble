@@ -1,0 +1,189 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add an Ebeco EB-Therm 300",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "psk": {
+        "title": "Enter the Open API PSK",
+        "description": "Enter the 32-byte pre-shared key for {name}, base64-encoded, as provisioned in the Ebeco Connect app. This is validated with a live handshake before the device is added.",
+        "data": {
+          "psk": "Pre-shared key (base64)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Handshake failed — the PSK was rejected by the device. Double-check it against the Ebeco Connect app.",
+      "cannot_connect": "Could not connect — is the thermostat powered on and in range?",
+      "psk_not_base64": "That isn't valid base64.",
+      "psk_wrong_length": "Decoded key must be exactly 32 bytes."
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "no_devices_found": "No EB300 devices found nearby"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "poll_interval": "Poll interval (seconds)",
+          "rated_watts": "Heating element wattage (0 disables the derived energy sensor)",
+          "use_room_sensor": "Use the room sensor (instead of floor) as the climate entity's current temperature"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "floor_temperature": {
+        "name": "Floor temperature"
+      },
+      "room_temperature": {
+        "name": "Room temperature"
+      },
+      "relay_temperature": {
+        "name": "Relay temperature"
+      },
+      "target_temperature": {
+        "name": "Target temperature"
+      },
+      "program": {
+        "name": "Program",
+        "state": {
+          "manual": "Manual",
+          "home": "Home"
+        }
+      },
+      "heating_time": {
+        "name": "Heating time"
+      },
+      "time_to_target": {
+        "name": "Time to target"
+      },
+      "signal_strength": {
+        "name": "Signal strength"
+      },
+      "energy": {
+        "name": "Energy"
+      }
+    },
+    "binary_sensor": {
+      "heating": {
+        "name": "Heating"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "problem": {
+        "name": "Problem"
+      },
+      "limited_by_limiting_sensor": {
+        "name": "Limited by limiting sensor"
+      },
+      "room_sensor_fault": {
+        "name": "Room sensor fault"
+      },
+      "floor_sensor_fault": {
+        "name": "Floor sensor fault"
+      }
+    },
+    "switch": {
+      "key_lock": {
+        "name": "Key lock"
+      }
+    },
+    "select": {
+      "language": {
+        "name": "Language",
+        "state": {
+          "swedish": "Swedish",
+          "english": "English",
+          "norwegian": "Norwegian",
+          "finnish": "Finnish",
+          "german": "German",
+          "danish": "Danish"
+        }
+      },
+      "screensaver_type": {
+        "name": "Screensaver",
+        "state": {
+          "off": "Off",
+          "time_temp": "Time + temperature",
+          "time_date": "Time + date",
+          "temperature": "Temperature"
+        }
+      }
+    },
+    "number": {
+      "room_calibration": {
+        "name": "Room sensor calibration"
+      },
+      "floor_calibration": {
+        "name": "Floor sensor calibration"
+      }
+    },
+    "button": {
+      "sync_clock": {
+        "name": "Sync clock"
+      }
+    }
+  },
+  "services": {
+    "get_home_program": {
+      "name": "Get home program",
+      "description": "Reads the weekly Home program schedule from the thermostat.",
+      "fields": {}
+    },
+    "set_home_program": {
+      "name": "Set home program",
+      "description": "Writes part or all of the weekly Home program schedule to the thermostat. Use Days + Events to apply one schedule to several weekdays at once, or the Per day section for days that differ. Omitted days are left unchanged; a day's remaining slots keep the device's existing times, marked inactive.",
+      "fields": {
+        "days": {
+          "name": "Days",
+          "description": "Which weekdays the Events schedule below is written to."
+        },
+        "events": {
+          "name": "Events",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "monday": {
+          "name": "Monday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "tuesday": {
+          "name": "Tuesday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "wednesday": {
+          "name": "Wednesday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "thursday": {
+          "name": "Thursday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "friday": {
+          "name": "Friday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "saturday": {
+          "name": "Saturday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        },
+        "sunday": {
+          "name": "Sunday",
+          "description": "Up to 4 events, each with a time, a temperature in degrees Celsius, and an Active toggle. Clear Active to keep a slot's time but stop it firing - that is how a slot is switched off; the device always holds 4 slots per day and an inactive one still needs a valid, in-order time."
+        }
+      },
+      "sections": {
+        "per_day": {
+          "name": "Per day"
+        }
+      }
+    }
+  }
+}
