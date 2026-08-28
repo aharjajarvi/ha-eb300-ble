@@ -18,7 +18,7 @@ sync), and weekly schedule read/write via services.
 | `custom_components/eb300_ble/` | The integration. **The only thing HACS ships.** |
 | `custom_components/eb300_ble/eb300_ble/` | The protocol library. **The only copy of it.** |
 | `tests/lib/` | Library suite, 103 tests, no `homeassistant` dependency |
-| `tests/ha/` | HA-glue suite, 129 tests, pinned `homeassistant` |
+| `tests/ha/` | HA-glue suite, 164 tests, pinned `homeassistant` |
 | `tools/` | Hardware bring-up CLIs — need a real device |
 | `docs/` | ARCHITECTURE, PROTOCOL, HARDWARE_NOTES, DEVELOPMENT |
 
@@ -55,7 +55,7 @@ uv run --project tests/lib ruff check .
 uv run --project tests/lib mypy
 ```
 
-232 tests, all four clean. None of them need hardware.
+267 tests, all four clean. None of them need hardware.
 
 ## Code you should not casually refactor
 

@@ -77,6 +77,24 @@ def test_selector_declares_multiple_and_fields(day):
 
 
 @pytest.mark.parametrize("day", WEEKDAYS)
+def test_selector_row_preview_can_show_active(day):
+    """A collapsed row must be able to show all three fields, `active` included.
+
+    The frontend gives an object selector exactly two display knobs,
+    `label_field` and `description_field`, each naming one field — no per-row
+    icon, badge or colour exists. Setting both showed time and temperature and
+    silently dropped `active`, so an event that had been switched off looked
+    identical to one that was on.
+
+    Declaring neither makes ha-selector-object fall back to joining every
+    declared field with " · ", which is the only arrangement that fits three.
+    """
+    config = DAY_FIELDS[day]["selector"]["object"]
+    assert "label_field" not in config
+    assert "description_field" not in config
+
+
+@pytest.mark.parametrize("day", WEEKDAYS)
 def test_selector_rejects_unknown_event_key(day):
     sel = make_selector(DAY_FIELDS[day]["selector"])
     with pytest.raises(vol.Invalid):

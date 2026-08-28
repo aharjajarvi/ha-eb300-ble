@@ -71,6 +71,46 @@ scanner seemed to show the device only while the app was running. That was an
 artifact of the scanner UI. Had it been real, the device would have been
 unconnectable to anything and a poll-based integration impossible.
 
+**Advertising is not connectability**, though: see *"The phone app holds the
+only connection"* below. A device that is discovered, in range and advertising
+happily can still refuse every connect, and that is the failure mode users
+actually hit.
+
+### A sensor the device cannot read reports 20.0 °C, not an error
+
+The `0x1004` status struct always carries a temperature for both sensors, even
+one that is not wired. The value in it is a **placeholder: exactly 200
+decidegrees**.
+
+Observed 2026-08-28 on the reference device, floor sensor disconnected and the
+control method switched to the room sensor:
+
+| | Before | After |
+|---|---|---|
+| `floor_temperature` | 25.7 °C, tracking normally | **20.0 °C**, and pinned there for hours |
+| `floor_sensor_error` | 0 | non-zero |
+| `error_flags` | no floor bits | still no floor bits |
+| `in_error_state` | false | false |
+
+Two things make this worth a note:
+
+- **20.0 °C is a plausible floor temperature.** Nothing about the value itself
+  says "not a measurement". Only `floor_sensor_error` does.
+- **It is a normal state, not a fault.** A thermostat run on the room sensor
+  alone is a supported installation; the Ebeco app stops reporting an error
+  once its control method is set to the room sensor. The device still flags the
+  unwired sensor in its per-sensor error byte, but not in `ErrorFlags` — so the
+  `Problem` binary sensor stays `off`, correctly.
+
+The integration therefore reports `None` (state `unknown`) for a temperature
+whose sensor error byte is non-zero — floor and room alike, and for the
+`climate` entity's current temperature — rather than letting a constant
+fiction into recorder, statistics and automations. Any non-zero code counts;
+none of them are enumerated, because "not a measurement" is the only
+distinction that matters at that point. `SensorErrorCode` is in the
+diagnostics download for anyone who needs to tell a disconnected sensor from a
+broken one.
+
 ### Device info is not what you would guess
 
 - The serial-number PID returns the device's **MAC as a string**, not a
@@ -120,6 +160,31 @@ The only lever that actually works is a hard ceiling on our side:
 outliers and well below the pathological cases. `MAX_TRANSIENT_ERRORS` is not
 exposed as a parameter and is shared module state — monkeypatching it would
 affect every other Bluetooth integration in the process.
+
+### The phone app holds the only connection
+
+While the Ebeco Connect app is connected, Home Assistant's polls fail and the
+entities go unavailable. Observed 2026-08-28 as repeated multi-minute
+unavailable windows — 19:40–19:46, 20:01–20:07, 20:21–20:35 — on a device that
+was in range and advertising throughout, during an evening of going in and out
+of the app.
+
+The tell is on the thermostat itself: **the Bluetooth glyph on the display is
+lit while something is connected**, and goes out when the link is released.
+
+Backgrounding the app does not release it. The phone keeps the link across a
+screen lock and an app switch; only closing the app properly — swiped out of
+the app switcher, or force-stopped — frees it, after which the next poll
+succeeds.
+
+**The mechanism is inferred, not proven.** The observations fit a device that
+serves one connection at a time, but nobody has deliberately held two links
+open to confirm that is the limit. What is established is the symptom, the
+tell, and the cure — and that neither range nor the integration is at fault.
+
+This is worth knowing before debugging anything else: sitting with the app open
+while poking at Home Assistant is exactly the setup that produces it, and it
+looks like a flaky integration.
 
 ### Poll interval is a shared-resource decision
 

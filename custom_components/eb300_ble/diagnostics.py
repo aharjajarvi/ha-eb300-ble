@@ -11,8 +11,22 @@ from homeassistant.core import HomeAssistant
 
 from . import EB300ConfigEntry
 from .const import CONF_PSK
+from .eb300_ble.const import SensorErrorCode
 
 TO_REDACT = {CONF_PSK, "address", "serial"}
+
+
+def _sensor_error(raw: int) -> str:
+    """Name the per-sensor error byte, without trusting it to be a known code.
+
+    Worth having in every bug report: a non-zero code here is why a temperature
+    sensor reads `unknown` (sensor.py suppresses the device's placeholder), and
+    it separates a broken sensor from one that was never wired.
+    """
+    try:
+        return SensorErrorCode(raw).name.lower()
+    except ValueError:
+        return f"unknown_{raw}"
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: EB300ConfigEntry) -> dict[str, Any]:
@@ -33,6 +47,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: EB300Co
             "current_set_temperature_c": data.status.current_set_temperature_c,
             "room_temperature_c": data.status.room_temperature_c,
             "floor_temperature_c": data.status.floor_temperature_c,
+            "room_sensor_error": _sensor_error(data.status.room_sensor_error),
+            "floor_sensor_error": _sensor_error(data.status.floor_sensor_error),
             "relay_temperature_c": data.status.relay_temperature_c,
             "relay_on": data.status.relay_on,
             "power_off": data.status.power_off,

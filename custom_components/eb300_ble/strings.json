@@ -31,7 +31,7 @@
       "init": {
         "data": {
           "poll_interval": "Poll interval (seconds)",
-          "rated_watts": "Heating element wattage (0 disables the derived energy sensor)",
+          "rated_watts": "Heating element wattage (0 disables the derived energy and power sensors)",
           "use_room_sensor": "Use the room sensor (instead of floor) as the climate entity's current temperature"
         }
       }
@@ -69,14 +69,17 @@
       },
       "energy": {
         "name": "Energy"
+      },
+      "power": {
+        "name": "Power"
       }
     },
     "binary_sensor": {
       "heating": {
         "name": "Heating"
       },
-      "power": {
-        "name": "Power"
+      "powered_on": {
+        "name": "Powered on"
       },
       "problem": {
         "name": "Problem"

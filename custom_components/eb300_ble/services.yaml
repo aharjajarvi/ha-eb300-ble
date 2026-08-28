@@ -49,8 +49,18 @@ set_home_program:
       selector:
         object:
           multiple: true
-          label_field: time
-          description_field: temperature
+          # No `label_field` / `description_field` on purpose. Those two are the
+          # only display knobs an object selector has — there is no per-row
+          # icon, badge or colour — and each names exactly ONE field, so
+          # together they can show at most two of the three. `active` was the
+          # one left out, which made an inactive slot indistinguishable from an
+          # active one in the collapsed row.
+          #
+          # With no `label_field`, the frontend falls back to joining *every*
+          # declared field with " · ", so a row reads
+          # `05:00:00 · 25 °C · false`. A row with no `active` key shows just
+          # the first two — an omitted flag means active (the service schema
+          # defaults it to true), so nothing is being hidden.
           fields:
             time:
               label: Time

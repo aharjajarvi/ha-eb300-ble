@@ -11,7 +11,7 @@
 > What that does *not* mean: it is not untested or unverified. Every feature
 > here was exercised against a real EB-Therm 300 — including the write paths,
 > run attended with device state snapshotted and restored — and the repo
-> carries 232 automated tests that run without hardware.
+> carries 267 automated tests that run without hardware.
 >
 > What it does mean: it has been validated on exactly **one** device
 > (firmware 1.2, batch 2603) by **one** person, and no third party has
@@ -98,7 +98,7 @@ Then paste the base64 PSK. That's the whole setup.
 ## Entities
 
 One device. A `climate` entity for control, plus twenty sensor, switch and
-settings entities — and an optional derived energy sensor.
+settings entities — and two optional derived sensors, power and energy.
 
 ### Control
 
@@ -116,14 +116,15 @@ settings entities — and an optional derived energy sensor.
 
 | Entity | Platform | Notes |
 |---|---|---|
-| Floor temperature | `sensor` | |
-| Room temperature | `sensor` | |
+| Floor temperature | `sensor` | `unknown` when the thermostat cannot read that sensor — see [No floor sensor](#no-floor-sensor-installed-the-floor-reading-goes-unknown). |
+| Room temperature | `sensor` | `unknown` on a room-sensor fault, same rule. |
 | Target temperature | `sensor` | The setpoint currently in force. |
 | Program | `sensor` | `manual` or `home`. |
 | Heating time | `sensor` | Cumulative relay-on hours, read from the device. |
-| Energy | `sensor` | **Only created if you set a heating element wattage** in the integration options — the thermostat has no energy metering of its own, so this is derived from relay-on time × wattage. |
+| Energy | `sensor` | **Only created if you set a heating element wattage.** Derived from the device's relay-on minute counter × wattage — the thermostat has no energy metering of its own. |
+| Power | `sensor` | **Only created if you set a heating element wattage.** The wattage while the relay is closed, 0 W while it is open. [Simulated](#power-and-energy-are-simulated), not measured. |
 | Heating | `binary_sensor` | Relay state. |
-| Power | `binary_sensor` | |
+| Powered on | `binary_sensor` | Whether the thermostat itself is switched on — not to be confused with the `Power` sensor above. |
 | Problem | `binary_sensor` | Any active error flag. |
 | Relay temperature | `sensor` | Diagnostic. |
 | Time to target | `sensor` | Diagnostic. |
@@ -138,8 +139,8 @@ settings entities — and an optional derived energy sensor.
 | Option | Default | Notes |
 |---|---|---|
 | Poll interval | 300 s | 60–1800 s. Each poll is a full BLE connect; see [Bluetooth budget](#bluetooth-budget) before lowering it. |
-| Heating element wattage | 0 (off) | Enables the derived `Energy` sensor. |
-| Use room sensor for climate | off | By default the `climate` entity reports the **floor** sensor as current temperature. |
+| Heating element wattage | 0 (off) | Enables the derived `Power` and `Energy` sensors. Both are created together, or not at all. |
+| Use room sensor for climate | off | By default the `climate` entity reports the **floor** sensor as current temperature. Turn this on if no floor sensor is wired. |
 
 ---
 
@@ -202,6 +203,11 @@ Two rules the device enforces, and so does this integration:
     - { time: "23:30", temperature: 17.0, active: false }
 ```
 
+In the UI's event editor each row shows all three fields —
+`23:00:00 · 17 °C · false` — so a slot that has been switched off is visible
+without opening it. A row with no flag shown is active; that is the default
+when the key is omitted.
+
 Setting the schedule does **not** switch the thermostat into the Home program —
 change the `climate` entity's preset to `home` for that.
 
@@ -254,6 +260,54 @@ show the current temperature. This is a device limitation, not an integration
 bug, and it is why Ebeco's own app only offers two of the four. See
 [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md).
 
+### Power and energy are simulated
+
+The EB-Therm 300 measures neither. Both sensors are the heating element
+wattage you entered, multiplied by what the relay is doing:
+
+| Sensor | Derived from | Caveat |
+|---|---|---|
+| `Power` (W) | the relay's state **at poll time** | A burst of heating that falls between two polls is invisible; one that spans a poll reads as if it ran the whole interval. |
+| `Energy` (kWh) | the device's own cumulative **relay-on minute counter** | Misses nothing — the counter runs on the thermostat, so the poll interval does not matter. |
+
+So `Power` is for seeing what the floor is doing right now, and `Energy` is
+what you point the energy dashboard at. Reading totals off the power sensor
+instead will undercount or overcount, depending on the poll interval.
+
+Both assume the element draws its rated wattage whenever the relay is closed,
+which is what a resistive heating cable does. Neither reacts to mains voltage,
+and an inaccurate wattage propagates straight through. If you want measured
+figures, a smart plug or an energy meter on the circuit is the answer.
+
+### No floor sensor installed: the floor reading goes `unknown`
+
+Running the thermostat on its room sensor alone, with nothing wired to the
+floor-sensor terminals, is a supported installation — set the control method to
+the room sensor in the Ebeco app and the app stops reporting an error.
+
+The thermostat still sends a floor temperature in that state, and **it is a
+placeholder: a constant 20.0 °C**. It is not a measurement, and 20.0 °C is
+plausible enough to be believed — on the tested firmware the reading snapped
+from 25.7 °C to exactly 20.0 °C the moment the sensor was disconnected, and
+stayed there.
+
+This integration suppresses it. When the thermostat reports an error for a
+sensor, that sensor's entity is `unknown` rather than a fabricated number, so
+nothing fake reaches history, statistics or your automations:
+
+| Entity | With a working floor sensor | With none wired |
+|---|---|---|
+| `sensor.…_floor_temperature` | the measurement | `unknown` |
+| `binary_sensor.…_floor_sensor_fault` | `off` | `on` |
+| `climate.…` current temperature | the floor reading | `unknown`, **unless** you turn on *Use room sensor for climate* |
+
+So on a room-sensor-only installation, turn on **Use room sensor for climate**
+in the integration options — otherwise the thermostat card has no current
+temperature to show. The `Floor sensor fault` binary sensor staying `on` is
+correct and expected there; the exact code the device reports is in the
+diagnostics download if you want to tell a disconnected sensor from a broken
+one.
+
 ### The display does not show the setpoint
 
 If you change the target temperature from Home Assistant and then look at the
@@ -274,7 +328,36 @@ paste it whole — it is base64, 44 characters.
 The device is out of range or powered off. Note that the thermostat advertises
 continuously while powered — it does *not* need the Ebeco app to be open, and
 it does not sleep its radio. If nothing sees it, it is a range or adapter
-problem.
+problem. (The reverse *does* bite — see the next entry.)
+
+> [!IMPORTANT]
+> **Close the Ebeco app properly, or Home Assistant cannot reach the thermostat.**
+>
+> While the Ebeco Connect app on your phone is connected to the thermostat,
+> every Home Assistant poll fails and the entities go unavailable — often for
+> minutes at a stretch, coming back only when the app lets go. The thermostat
+> appears to serve **one Bluetooth connection at a time**, and the app is
+> holding it.
+>
+> It looks like a range problem and is not. The device keeps advertising while
+> the app is connected, so it is still discovered and still shows up in scans.
+> Only the *connect* fails.
+>
+> | Look at the thermostat | What it means |
+> |---|---|
+> | Bluetooth glyph **lit** | Something is connected right now — that is the app, not HA |
+> | Bluetooth glyph **off** | The link is free; the next poll will land |
+>
+> **Backgrounding the app is not closing it.** Locking the phone, switching
+> apps, or leaving the app on screen with the phone in your pocket all keep the
+> connection open. Swipe the app out of the app switcher (or force-stop it),
+> confirm the glyph on the thermostat goes out, and Home Assistant recovers on
+> its next poll — up to one poll interval, 5 minutes by default. Reloading the
+> integration polls straight away if you would rather not wait.
+>
+> Being in and out of the app while debugging something in Home Assistant is
+> exactly the situation that produces this, and it is easy to blame the
+> integration for it.
 
 **The device is never discovered.**
 Confirm HA's Bluetooth integration is loaded and an adapter or proxy is in
@@ -283,7 +366,9 @@ range. `tools/scan.py` can confirm the device is advertising and whether bit 5
 
 **Entities go unavailable, then come back.**
 Expected if the device is briefly out of reach. A failed poll does not
-immediately mark the device unavailable; it takes a few cycles.
+immediately mark the device unavailable; it takes a few cycles. If it keeps
+happening, check whether the Ebeco app is open on a phone in the house — that
+is the common cause, and the Bluetooth glyph on the thermostat tells you.
 
 **Filing a bug.** Include the diagnostics download from the device page — the
 PSK, the device address and the serial are redacted automatically — plus your
@@ -299,7 +384,7 @@ commands, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit,
 protocol, and [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md) for firmware
 behaviour found on real hardware.
 
-Two test suites, 232 tests, no thermostat required:
+Two test suites, 267 tests, no thermostat required:
 
 ```sh
 ./tests/lib/run.sh      # library: protocol, crypto, advertisements, client

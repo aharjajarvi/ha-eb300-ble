@@ -167,9 +167,10 @@ class EB300OptionsFlow(OptionsFlow):
                 vol.Required("poll_interval", default=current_interval): vol.All(
                     vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
                 ),
-                # Optional (docs/ARCHITECTURE.md): 0 disables the derived
-                # energy (kWh) sensor, since the device has no energy metering
-                # of its own — see sensor.py's heating_time/energy entities.
+                # Optional (docs/ARCHITECTURE.md): 0 disables both derived
+                # entities — energy (kWh) and power (W) — since the device
+                # measures neither. Both are relay-on time or state multiplied
+                # by this number; see sensor.py.
                 vol.Optional("rated_watts", default=current_watts): vol.All(
                     vol.Coerce(float), vol.Range(min=0, max=5000)
                 ),

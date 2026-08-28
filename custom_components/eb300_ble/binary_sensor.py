@@ -32,8 +32,13 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[EB300BinarySensorDescription, ...] = (
         is_on_fn=lambda data: data.status.relay_on,
     ),
     EB300BinarySensorDescription(
+        # `key` is the unique_id and stays `power` deliberately: renaming it
+        # would orphan the existing registry entry and throw away its history
+        # for a cosmetic change. Only the *name* moves, via translation_key —
+        # "Power" now belongs to the derived power (W) sensor, and two entities
+        # on one device called "Power" is worse than a stale entity_id.
         key="power",
-        translation_key="power",
+        translation_key="powered_on",
         device_class=BinarySensorDeviceClass.POWER,
         is_on_fn=lambda data: not data.status.power_off,
     ),

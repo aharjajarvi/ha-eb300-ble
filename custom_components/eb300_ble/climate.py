@@ -97,9 +97,20 @@ class EB300Climate(EB300Entity, ClimateEntity):
         self._write_task = None
 
     @property
-    def current_temperature(self) -> float:
+    def current_temperature(self) -> float | None:
+        """`None` when the device cannot read the sensor this entity follows.
+
+        The status struct still carries a temperature for an unreadable sensor,
+        and it is a placeholder (20.0 C on the tested firmware), not a
+        measurement — see sensor.py, where the same rule is applied to the
+        floor and room temperature sensors. A thermostat wired without a floor
+        sensor is a supported installation, so the default floor-following
+        climate entity would otherwise show a convincing, permanent 20.0 C.
+        """
         status = self.coordinator.data.status
-        return status.room_temperature_c if self._use_room_sensor else status.floor_temperature_c
+        if self._use_room_sensor:
+            return None if status.room_sensor_error else status.room_temperature_c
+        return None if status.floor_sensor_error else status.floor_temperature_c
 
     @property
     def target_temperature(self) -> float:
