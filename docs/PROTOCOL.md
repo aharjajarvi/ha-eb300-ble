@@ -50,6 +50,9 @@ worth doing the same in any other implementation.
 You can detect this condition *before* connecting: bit 5 of the advertisement's
 encryption-flags byte is set when an Open API PSK is provisioned.
 
+From the owner's side, provisioning is self-service: Ebeco Connect app →
+device → Settings → Functions → Enable local API, which emails them the key.
+
 ### Key derivation
 
 Session key and HMAC key are both derived from the PSK with HKDF, salted with

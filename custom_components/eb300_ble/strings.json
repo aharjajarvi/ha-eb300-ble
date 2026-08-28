@@ -9,14 +9,14 @@
       },
       "psk": {
         "title": "Enter the Open API PSK",
-        "description": "Enter the 32-byte pre-shared key for {name}, base64-encoded, as provisioned in the Ebeco Connect app. This is validated with a live handshake before the device is added.",
+        "description": "Enter the base64 key Ebeco emailed you after you enabled local API for {name} in the Ebeco Connect app (Device → Settings → Functions → Enable local API). It is validated with a live handshake before the device is added.",
         "data": {
           "psk": "Pre-shared key (base64)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Handshake failed — the PSK was rejected by the device. Double-check it against the Ebeco Connect app.",
+      "invalid_auth": "Handshake failed — the key was rejected by the device. Check you used the key emailed for this thermostat; keys are per device.",
       "cannot_connect": "Could not connect — is the thermostat powered on and in range?",
       "psk_not_base64": "That isn't valid base64.",
       "psk_wrong_length": "Decoded key must be exactly 32 bytes."

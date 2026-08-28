@@ -4,6 +4,22 @@
 [![Tests](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/tests.yml/badge.svg)](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/tests.yml)
 [![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
 
+> [!NOTE]
+> **Built with AI assistance.** This integration was written largely by an AI
+> coding assistant (Claude), directed and reviewed by a human maintainer.
+>
+> What that does *not* mean: it is not untested or unverified. Every feature
+> here was exercised against a real EB-Therm 300 — including the write paths,
+> run attended with device state snapshotted and restored — and the repo
+> carries 232 automated tests that run without hardware.
+>
+> What it does mean: it has been validated on exactly **one** device
+> (firmware 1.2, batch 2603) by **one** person, and no third party has
+> reviewed the code. It controls a heating system in your home. Read
+> [`docs/HARDWARE_NOTES.md`](docs/HARDWARE_NOTES.md) — including its
+> *"Two known gaps, stated honestly"* section — and satisfy yourself before
+> pointing automations at it.
+
 Local Bluetooth control of the **Ebeco EB-Therm 300** underfloor heating
 thermostat, over Ebeco's own Open Local API. No cloud, no account, no polling
 of Ebeco's servers — Home Assistant talks straight to the thermostat over an
@@ -15,26 +31,34 @@ Everything runs locally: `iot_class` is `local_polling`.
 
 ## Before you install: you need a PSK
 
-**This is the one hard requirement, and it is worth checking before anything
-else.** The Open API channel is encrypted with a 32-byte pre-shared key that
-must be **provisioned onto the thermostat's Open API key slot** using the
-**Ebeco Connect** app or Ebeco's backend. Without it:
+The Open API channel is encrypted with a 32-byte pre-shared key. You enable it
+yourself in the Ebeco Connect app, and Ebeco emails you the key:
 
-- the handshake fails immediately — the device answers with an error rather
-  than a session, and setup stops at the PSK step;
-- no amount of retrying, re-pairing or moving the device closer will help.
+> **Ebeco Connect → your device → Settings → Functions → Enable local API**
+>
+> The key arrives by email, at the address on your Ebeco account.
 
-The key is **per device**. Two thermostats need two keys.
+That is the whole process — no support ticket, no waiting on Ebeco to
+provision anything by hand.
 
-You can check whether a device is provisioned before you even install this:
-the EB300's BLE advertisement carries an encryption-flags byte, and **bit 5
-set means an Open API PSK is present**. `tools/scan.py` in this repo decodes
-and prints exactly that.
+Two things worth knowing:
 
-Enter the key into Home Assistant **base64-encoded** (32 bytes → 44
-characters). The config flow validates it with a real handshake against the
-device before creating the entry, so a wrong key fails at setup rather than
-silently later.
+- **The key is per device.** Two thermostats mean enabling local API twice and
+  getting two different keys.
+- **Nothing works without it.** With local API disabled, the handshake fails
+  immediately — the thermostat answers with an error instead of a session, and
+  setup stops at the PSK step. Retrying, re-pairing or moving the device closer
+  will not help.
+
+You can confirm a device is enabled before installing anything. The EB300's BLE
+advertisement carries an encryption-flags byte, and **bit 5 set means the Open
+API key is provisioned**. `tools/scan.py` in this repo decodes and prints
+exactly that, and needs no key of its own.
+
+Paste the key into Home Assistant exactly as it arrives — **base64**, 44
+characters for 32 bytes. The config flow validates it with a real handshake
+against the thermostat before creating the entry, so a wrong or mistyped key
+fails during setup rather than silently later.
 
 ### Other requirements
 
@@ -243,7 +267,8 @@ a write landed.
 
 **Setup fails with "Handshake failed — the PSK was rejected."**
 The key is wrong, or it belongs to a different thermostat. Keys are per-device.
-Re-copy it from the Ebeco Connect app.
+Re-check the email Ebeco sent when you enabled local API for *this* device, and
+paste it whole — it is base64, 44 characters.
 
 **Setup fails with "Could not connect."**
 The device is out of range or powered off. Note that the thermostat advertises

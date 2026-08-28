@@ -5,10 +5,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before filing: if the thermostat is never discovered, or setup fails at
-        the PSK step, check first that an **Open API PSK is provisioned** on the
-        device. Without it the handshake cannot succeed, and that is not a bug
-        in this integration. See the README's "Getting a PSK" section.
+        Before filing: if setup fails at the PSK step, check first that local
+        API is enabled for this thermostat — Ebeco Connect app, Device →
+        Settings → Functions → Enable local API, which emails you the key.
+        Without it the handshake cannot succeed, and that is not a bug in this
+        integration. See the README's "Before you install: you need a PSK".
   - type: input
     id: ha_version
     attributes:
