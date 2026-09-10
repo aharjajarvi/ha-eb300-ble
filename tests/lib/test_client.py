@@ -66,6 +66,40 @@ async def test_handshake_fails_with_wrong_psk():
     assert exc_info.value.step == 3
 
 
+# `is_psk_rejection` decides whether the HA side starts a reauth flow or just
+# retries, so the two real rejection shapes must answer True and the failures
+# that only look like them must not.
+
+
+async def test_both_rejection_shapes_report_psk_rejection():
+    unprovisioned = EB300Client(FakeEB300(PSK, provisioned=False), PSK)
+    with pytest.raises(HandshakeError) as exc_info:
+        await unprovisioned.connect()
+    assert exc_info.value.is_psk_rejection
+
+    wrong_key = EB300Client(FakeEB300(PSK), bytes(range(1, 33)))
+    with pytest.raises(HandshakeError) as exc_info:
+        await wrong_key.connect()
+    assert exc_info.value.is_psk_rejection
+
+
+@pytest.mark.parametrize(
+    ("step", "error_code"),
+    [
+        (0, None),  # timed out waiting for a handshake response
+        (1, None),  # malformed/unexpected message type at step 1
+        (3, None),  # malformed/unexpected message type at step 3
+    ],
+)
+def test_transient_handshake_failures_are_not_psk_rejections(step, error_code):
+    assert not HandshakeError("x", step=step, error_code=error_code).is_psk_rejection
+
+
+def test_step_4_hmac_mismatch_is_a_psk_rejection():
+    """The one rejection the device does not signal with an error code."""
+    assert HandshakeError("x", step=4).is_psk_rejection
+
+
 async def test_read_device_info():
     device = FakeEB300(PSK)
     client = EB300Client(device, PSK)

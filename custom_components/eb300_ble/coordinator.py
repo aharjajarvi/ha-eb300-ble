@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -26,7 +26,7 @@ from .const import (
 )
 from .eb300_ble.client import BleakTransport, EB300Client
 from .eb300_ble.const import PID, KeyLock, Language, Operation, Program, ScreensaverType
-from .eb300_ble.exceptions import EB300ConnectionError, EB300Error, ValidationError
+from .eb300_ble.exceptions import EB300ConnectionError, EB300Error, HandshakeError, ValidationError
 from .eb300_ble.models import DeviceInfo as EB300DeviceInfo
 from .eb300_ble.models import HomeProgram, ThermostatStatus
 from .eb300_ble.protocol import HOME_PROGRAM_EVENTS_PER_DAY, HomeProgramEvent
@@ -86,6 +86,13 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
         try:
             return await self._with_client(self._poll)
         except (EB300Error, TimeoutError) as exc:
+            if isinstance(exc, HandshakeError) and exc.is_psk_rejection:
+                # The key is dead, not the link — Ebeco re-issues a PSK every
+                # time local API is toggled in their app. Hand it to HA's reauth
+                # machinery (config_flow.async_step_reauth) so the user gets a
+                # "reconfigure" prompt instead of a repair-less entry retrying a
+                # key the device will never accept.
+                raise ConfigEntryAuthFailed(f"{self.address} rejected the stored PSK: {exc}") from exc
             # `str(TimeoutError())` is empty; fall back to the type name so the
             # log line never trails off after the colon.
             raise UpdateFailed(
@@ -241,6 +248,11 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
                 _LOGGER.debug(
                     "Attempt %d/%d for %s failed: %s", attempt, CONNECT_RETRY_ATTEMPTS, self.address, exc
                 )
+                if isinstance(exc, HandshakeError) and exc.is_psk_rejection:
+                    # Nothing to retry: the device has refused this key, and two
+                    # more attempts only burn shared BLE connection slots before
+                    # failing the same way.
+                    break
         assert last_error is not None
         raise last_error
 

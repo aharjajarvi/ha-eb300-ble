@@ -6,11 +6,13 @@
 Home Assistant
   │
   ├─ config_flow.py     discovery (manufacturer ID 0x0F93 / service UUID), PSK entry,
-  │                     validated with a real handshake before the entry is created
+  │                     validated with a real handshake before the entry is created;
+  │                     reauth/reconfigure replace a rotated PSK on the existing entry
   │
   ├─ coordinator.py     EB300Coordinator (DataUpdateCoordinator)
   │                     connect → handshake → read → disconnect, every cycle
   │                     all writes funnel through here too
+  │                     a refused PSK becomes ConfigEntryAuthFailed, not UpdateFailed
   │
   ├─ entity.py          EB300Entity base: device info, availability
   ├─ climate.py         the control surface (setpoint, on/off, program preset)

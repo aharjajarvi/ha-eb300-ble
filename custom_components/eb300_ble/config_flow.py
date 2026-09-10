@@ -5,11 +5,18 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, async_discovered_service_info
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import format_mac
 
@@ -49,7 +56,14 @@ async def _validate_and_fetch_device_info(address: str, psk: bytes) -> DeviceInf
         await client.connect()
         return await client.read_device_info()
     except HandshakeError as exc:
-        raise InvalidAuth from exc
+        # A handshake that timed out or came back malformed is a connection
+        # problem wearing an auth-shaped exception; only an outright rejection
+        # means the key is wrong. Telling the two apart matters most in reauth,
+        # where "your key was rejected" on a flaky link would send the user off
+        # to re-request a key that is in fact fine.
+        if exc.is_psk_rejection:
+            raise InvalidAuth from exc
+        raise CannotConnect from exc
     except (EB300ConnectionError, TimeoutError) as exc:
         raise CannotConnect from exc
     finally:
@@ -144,6 +158,78 @@ class EB300ConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_PSK): str}),
             errors=errors,
             description_placeholders={"name": self._discovered_name or self._discovered_address or ""},
+        )
+
+    # ── Replacing the PSK on an existing entry ───────────────────────────
+    #
+    # The key is a device credential that can be re-issued: disabling and
+    # re-enabling local API in the Ebeco Connect app mails out a new one, which
+    # makes the stored key dead. Both routes below swap it in place, so entity
+    # IDs, history, names and area assignments all survive — deleting and
+    # re-adding the entry loses the registry customisations.
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Started by the coordinator when the device refuses the stored PSK."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_replace_psk("reauth_confirm", self._get_reauth_entry(), user_input)
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """User-initiated: the key was rotated before a poll had a chance to fail."""
+        return await self._async_replace_psk("reconfigure", self._get_reconfigure_entry(), user_input)
+
+    async def _async_replace_psk(
+        self, step_id: str, entry: ConfigEntry, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Shared body for both routes: validate a new PSK against the entry's device.
+
+        The address is taken from the entry and never re-asked. It is the
+        unique ID, so a different address is a different thermostat and belongs
+        in a new entry, not this one.
+        """
+        errors: dict[str, str] = {}
+        address = entry.data[CONF_ADDRESS]
+
+        if user_input is not None:
+            try:
+                psk = _decode_psk(user_input[CONF_PSK])
+            except vol.Invalid as exc:
+                errors[CONF_PSK] = str(exc.error_message or "psk_not_base64")
+            else:
+                try:
+                    await _validate_and_fetch_device_info(address, psk)
+                except InvalidAuth:
+                    errors["base"] = "invalid_auth"
+                except CannotConnect:
+                    errors["base"] = "cannot_connect"
+                else:
+                    return self._async_apply_psk(entry, user_input[CONF_PSK].strip())
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({vol.Required(CONF_PSK): str}),
+            errors=errors,
+            description_placeholders={"name": entry.title, "address": address},
+        )
+
+    @callback
+    def _async_apply_psk(self, entry: ConfigEntry, psk_b64: str) -> ConfigFlowResult:
+        """Write the validated key back and get the entry reloaded onto it."""
+        changed = self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_PSK: psk_b64}
+        )
+        # `async_update_entry` only fires the update listener (which reloads us,
+        # see __init__._async_update_listener) when something actually changed.
+        # Re-entering the key already stored changes nothing, and a reauth that
+        # ended there would otherwise leave the entry sitting in its failed
+        # state, so reload it explicitly. Deliberately not
+        # `async_update_reload_and_abort`: that reloads on top of the listener,
+        # and warns about exactly this pairing.
+        if not changed:
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return self.async_abort(
+            reason="reconfigure_successful" if self.source == SOURCE_RECONFIGURE else "reauth_successful"
         )
 
     @staticmethod

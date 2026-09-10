@@ -11,7 +11,7 @@
 > What that does *not* mean: it is not untested or unverified. Every feature
 > here was exercised against a real EB-Therm 300 — including the write paths,
 > run attended with device state snapshotted and restored — and the repo
-> carries 267 automated tests that run without hardware.
+> carries 287 automated tests that run without hardware.
 >
 > What it does mean: it has been validated on exactly **one** device
 > (firmware 1.2, batch 2603) by **one** person, and no third party has
@@ -131,6 +131,21 @@ settings entities — and two optional derived sensors, power and energy.
 | Signal strength | `sensor` | Diagnostic, disabled by default. |
 | Limited by limiting sensor | `binary_sensor` | Diagnostic. |
 | Room / floor sensor fault | `binary_sensor` | Diagnostic. |
+
+### If the key changes
+
+Ebeco issues a **new** key every time local API is re-enabled in the Connect
+app, which makes the one Home Assistant stored dead. Do not delete the device
+to fix that — deleting the entry throws away renamed entities, area
+assignments and every other setting Home Assistant keys to it.
+
+**Settings → Devices & Services → Ebeco EB-Therm 300 → ⋮ → Reconfigure**, and
+paste the new key. It is validated with a live handshake first, then swapped in
+place: entity IDs, history and settings are all kept.
+
+You will usually be asked before you get there. Once the thermostat starts
+refusing the stored key, the integration raises a **"Reconfigure"** prompt on
+its own rather than retrying a key the device will never accept.
 
 ### Options
 
@@ -324,6 +339,12 @@ The key is wrong, or it belongs to a different thermostat. Keys are per-device.
 Re-check the email Ebeco sent when you enabled local API for *this* device, and
 paste it whole — it is base64, 44 characters.
 
+**A device that used to work now asks to be reconfigured.**
+The thermostat is refusing the stored key — which happens when local API was
+toggled in the Ebeco app, because that re-issues the key. Paste the new one
+into the prompt, or [Reconfigure](#if-the-key-changes) the entry yourself.
+Nothing is lost.
+
 **Setup fails with "Could not connect."**
 The device is out of range or powered off. Note that the thermostat advertises
 continuously while powered — it does *not* need the Ebeco app to be open, and
@@ -384,7 +405,7 @@ commands, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit,
 protocol, and [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md) for firmware
 behaviour found on real hardware.
 
-Two test suites, 267 tests, no thermostat required:
+Two test suites, 287 tests, no thermostat required:
 
 ```sh
 ./tests/lib/run.sh      # library: protocol, crypto, advertisements, client

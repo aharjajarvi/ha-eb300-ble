@@ -19,6 +19,18 @@ class HandshakeError(EB300Error):
         self.step = step
         self.error_code = error_code
 
+    @property
+    def is_psk_rejection(self) -> bool:
+        """True when the device actively refused the key, not merely failed to answer.
+
+        Only two of the failure shapes mean "wrong PSK": the device replying
+        ERROR to a handshake step (`error_code` set), and the step-4 server
+        HMAC mismatch. A timeout (step 0) or a malformed/unexpected message
+        type is a connectivity or protocol problem and retrying it can
+        succeed, so callers must not treat those as an auth failure.
+        """
+        return self.error_code is not None or self.step == 4
+
 
 class DeviceError(EB300Error):
     """The device returned a non-zero error code for a request."""

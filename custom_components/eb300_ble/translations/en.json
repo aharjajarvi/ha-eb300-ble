@@ -13,6 +13,20 @@
         "data": {
           "psk": "Pre-shared key (base64)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Enter the new Open API PSK",
+        "description": "The key stored for {name} no longer works. Disabling and re-enabling local API in the Ebeco Connect app (Device → Settings → Functions → Enable local API) issues a new key by email; paste it here. It is validated with a live handshake, and replaces the old key in place — entities, history and settings are kept.",
+        "data": {
+          "psk": "Pre-shared key (base64)"
+        }
+      },
+      "reconfigure": {
+        "title": "Replace the Open API PSK",
+        "description": "Paste the current base64 key for {name}. Ebeco emails a new one each time local API is re-enabled in the Ebeco Connect app (Device → Settings → Functions → Enable local API). It is validated with a live handshake, and replaces the old key in place — entities, history and settings are kept. To point at a different thermostat, add it as a new device instead: the address is fixed to {address}.",
+        "data": {
+          "psk": "Pre-shared key (base64)"
+        }
       }
     },
     "error": {
@@ -23,7 +37,9 @@
     },
     "abort": {
       "already_configured": "This device is already configured",
-      "no_devices_found": "No EB300 devices found nearby"
+      "no_devices_found": "No EB300 devices found nearby",
+      "reauth_successful": "The new key was accepted; the thermostat is reconnected.",
+      "reconfigure_successful": "The new key was accepted; the thermostat is reconnected."
     }
   },
   "options": {
