@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The nightly run is for the `ha-latest` job below, which is the only one
+  # whose result can change without this repo changing.
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,4 +33,26 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: pytest
         # run.sh stages the component under an importable name first.
+        run: ./tests/ha/run.sh -q
+
+  ha-latest:
+    name: Home Assistant suite (latest HA, advisory)
+    runs-on: ubuntu-latest
+    # Never blocks a PR. This job answers "would the next HA upgrade break the
+    # integration?", which is a question about Home Assistant, not about the
+    # change under review -- failing a contributor's PR for it would be wrong.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Unpin homeassistant
+        # tests/ha/pyproject.toml pins the version the target instance runs, on
+        # purpose (AGENTS.md rule 3). Dropping the pin here lets uv resolve the
+        # newest release instead, without that choice being committed anywhere.
+        run: |
+          sed -i 's/"homeassistant==[0-9.]*"/"homeassistant"/' tests/ha/pyproject.toml
+          rm -f tests/ha/uv.lock
+      - name: Report the version under test
+        run: grep homeassistant tests/ha/pyproject.toml
+      - name: pytest
         run: ./tests/ha/run.sh -q

@@ -11,34 +11,13 @@ The per-sensor error byte is the only thing that distinguishes it from a real
 reading, since 20.0 C is not otherwise suspicious.
 """
 import pytest
+from conftest import PLACEHOLDER_DECIDEG  # noqa: F401 - re-exported for readers of this file
+from conftest import make_status as _status
 from eb300_ble.climate import EB300Climate
 from eb300_ble.eb300_ble.const import SensorErrorCode
-from eb300_ble.eb300_ble.models import ThermostatStatus
 from eb300_ble.sensor import SENSOR_DESCRIPTIONS
 
-PLACEHOLDER_DECIDEG = 200  # what the device reports for a sensor it cannot read
-
 DESCRIPTIONS = {d.key: d for d in SENSOR_DESCRIPTIONS}
-
-
-def _status(*, floor_error=0, room_error=0, floor=PLACEHOLDER_DECIDEG, room=233):
-    return ThermostatStatus(
-        error_flags=0,
-        current_set_temperature=200,
-        limiting_temperature=270,
-        time_to_target=0,
-        relay_on=False,
-        in_error_state=False,
-        limited_by_limiting_sensor=False,
-        power_off=False,
-        room_temperature=room,
-        floor_temperature=floor,
-        relay_temperature=332,
-        room_sensor_error=room_error,
-        floor_sensor_error=floor_error,
-        current_program=1,
-        energy_meter=518,
-    )
 
 
 class _Data:

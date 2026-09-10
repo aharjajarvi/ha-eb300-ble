@@ -24,10 +24,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#why-the-library-is-vendored).
 
 ```sh
 ./tests/lib/run.sh          # 108 tests, ~0.2s, no HA, no radio
-./tests/ha/run.sh           # 179 tests, needs the pinned homeassistant package
+./tests/ha/run.sh           # 290 tests, needs the pinned homeassistant package
 ```
 
-Both accept pytest arguments: `./tests/lib/run.sh -k crypto -v`.
+Both accept pytest arguments: `./tests/lib/run.sh -k crypto -v`, including
+coverage:
+
+```sh
+./tests/ha/run.sh --cov=eb300_ble --cov-report=term-missing
+```
+
+Worth running before deciding a path is covered. It is what showed that
+`climate.py`'s debounce/cancel logic had no tests at all while a doc claimed it
+did — every other signal, including a green suite, looked fine.
 
 `tests/ha/run.sh` stages the component into `tests/ha/.stage/eb300_ble` first,
 because these tests must import it as `eb300_ble` — the name Home Assistant

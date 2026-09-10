@@ -216,7 +216,22 @@ change this code, change it knowing why it looks the way it does.
 2. **Store the pending optimistic value *before* cancelling the previous
    task.** A task being cancelled is suspended at an `await` and cannot run
    another statement in between, so it can never clear a value stored on the
-   preceding line. The reverse order races.
+   preceding line.
+
+   *Correction, found while writing the regression tests (2026-09-10):* the
+   claim that "the reverse order races" is not true of the code as it now
+   stands, and no test can pin it. `async_set_temperature` runs both statements
+   with no `await` between them, and `_cancel_pending_write` only calls
+   `Task.cancel()`, which schedules cancellation rather than running the victim
+   — so the cancelled task cannot execute anything in between, whichever order
+   the two lines are in. Confirmed by mutation: swapping them fails nothing in
+   either suite. The rule was real in the *earlier* split design (an
+   `async_call_later` timer plus a separate write task), where the cancel path
+   could reach a callback synchronously; the single-task rewrite in rule 1
+   removed the hazard and the rule outlived it. Left in place in `climate.py`
+   as a comment, and left in place here, because the ordering is still the one
+   that would be correct if the design ever splits again — but it is a
+   convention now, not a constraint, and it should not be counted as tested.
 
 3. **Raise `HomeAssistantError` at the coordinator write boundary.** HA treats
    any other exception escaping a service call as an integration bug: full
@@ -233,8 +248,15 @@ in ~1.0 s, no unhandled tracebacks, no stale write landing after a reconnect.
 ### Two known gaps, stated honestly
 
 - **Burst cancellation is not hardware-verified.** Three rapid edits inside the
-  debounce window are covered by unit tests, but that path has never been
+  debounce window are covered by `tests/ha/test_climate_write_path.py`, as is a
+  newer edit preempting a write already in flight, but neither path has been
   exercised against a real device.
+
+  *Correction (2026-09-10):* this bullet claimed unit-test coverage from the
+  day it was written until the day it became true. There were no such tests —
+  `climate.py`'s whole write path was uncovered — and a green suite said
+  nothing about it either way. The tests named above now exist and were
+  mutation-checked: removing the cancellation fails three of them.
 - **Availability is not flipped on a failed write.** Doing so would cut the
   observed ~4-minute lag before a device shows as unavailable to roughly 2.
   Deliberately not implemented — it trades a faster unavailable signal for more

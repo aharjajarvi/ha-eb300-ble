@@ -11,7 +11,7 @@
 > What that does *not* mean: it is not untested or unverified. Every feature
 > here was exercised against a real EB-Therm 300 — including the write paths,
 > run attended with device state snapshotted and restored — and the repo
-> carries 287 automated tests that run without hardware.
+> carries 398 automated tests that run without hardware.
 >
 > What it does mean: it has been validated on exactly **one** device
 > (firmware 1.2, batch 2603) by **one** person, and no third party has
@@ -405,7 +405,7 @@ commands, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit,
 protocol, and [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md) for firmware
 behaviour found on real hardware.
 
-Two test suites, 287 tests, no thermostat required:
+Two test suites, 398 tests, no thermostat required:
 
 ```sh
 ./tests/lib/run.sh      # library: protocol, crypto, advertisements, client

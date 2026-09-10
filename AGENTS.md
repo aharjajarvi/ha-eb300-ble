@@ -18,7 +18,7 @@ sync), and weekly schedule read/write via services.
 | `custom_components/eb300_ble/` | The integration. **The only thing HACS ships.** |
 | `custom_components/eb300_ble/eb300_ble/` | The protocol library. **The only copy of it.** |
 | `tests/lib/` | Library suite, 108 tests, no `homeassistant` dependency |
-| `tests/ha/` | HA-glue suite, 179 tests, pinned `homeassistant` |
+| `tests/ha/` | HA-glue suite, 290 tests, pinned `homeassistant` |
 | `tools/` | Hardware bring-up CLIs — need a real device |
 | `docs/` | ARCHITECTURE, PROTOCOL, HARDWARE_NOTES, DEVELOPMENT |
 
@@ -35,6 +35,13 @@ sync), and weekly schedule read/write via services.
    and selector semantics move between HA releases. That has broken this
    integration at load time three times. `py_compile` does not catch it; only
    importing every module against a real `homeassistant` package does.
+
+   The pin tracks *the instance*, not the newest release — that is what makes a
+   green run mean something about the deployment. The `ha-latest` job in
+   `.github/workflows/tests.yml` covers the other half: it runs the same suite
+   against whatever HA published most recently, nightly, and never blocks a PR.
+   It tells you an upgrade is safe. It does not tell you the instance upgraded,
+   and it is not a substitute for moving the pin when it does.
 
 4. **Writes actuate real floor heating.** Read paths (`scan.py`, `read_all.py`,
    `poll.py`, the whole offline suite) can be exercised freely. Anything that
@@ -55,7 +62,13 @@ uv run --project tests/lib ruff check .
 uv run --project tests/lib mypy
 ```
 
-287 tests, all four clean. None of them need hardware.
+398 tests, all four clean. None of them need hardware.
+
+Coverage is worth checking before believing a path is tested — `./tests/ha/run.sh
+--cov=eb300_ble --cov-report=term-missing`. Everything under
+`custom_components/eb300_ble/*.py` is at 100% except `config_flow.py` (58%:
+discovery, manual entry and the options flow are untested; reauth/reconfigure
+are covered).
 
 ## Code you should not casually refactor
 
@@ -66,6 +79,12 @@ fix. The rules and their failure modes are in
 [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md#write-path-design-rules). Read
 them before touching either file; the code looks over-careful because it is
 exactly as careful as it needs to be.
+
+Rules 1, 3 and 4 now have regression tests — `tests/ha/test_climate_write_path.py`
+and `tests/ha/test_coordinator.py`, both mutation-checked. Rule 2 does not, and
+cannot: it describes a hazard the current single-task design removed. See the
+correction under rule 2 in HARDWARE_NOTES before reinstating it as a
+constraint.
 
 Similarly, `protocol.py`'s home-program validation looks fussy because the
 device enforces chronological ordering across *inactive* slots, and stores real
