@@ -19,6 +19,7 @@ from datetime import time as dt_time
 from typing import Any, cast
 
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -26,10 +27,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.target import TargetSelection, async_extract_referenced_entity_ids
 
 from .const import DOMAIN, SERVICE_GET_HOME_PROGRAM, SERVICE_SET_HOME_PROGRAM, WEEKDAYS
-from .coordinator import EB300Coordinator
+from .coordinator import EB300Coordinator, parse_home_program_events
 from .eb300_ble.exceptions import ValidationError
 from .eb300_ble.models import HomeProgram
-from .eb300_ble.protocol import validate_home_program_event_temperature
+from .eb300_ble.protocol import validate_home_program_day
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$")
 
@@ -90,12 +91,10 @@ SET_HOME_PROGRAM_SCHEMA = cv.make_entity_service_schema(
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register the two domain-level services, once per HA process.
 
-    A second config entry (a second thermostat) calls this again on its own
-    setup; `has_service` makes that a no-op instead of a duplicate
-    registration.
+    Called from the integration's `async_setup`, not per config entry, so the
+    services exist even while no thermostat is loaded: an automation that
+    calls one then gets "not loaded" rather than "action not found".
     """
-    if hass.services.has_service(DOMAIN, SERVICE_GET_HOME_PROGRAM):
-        return
 
     async def _async_get_home_program(call: ServiceCall) -> ServiceResponse:
         coordinator = _resolve_coordinator(hass, call)
@@ -105,19 +104,17 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def _async_set_home_program(call: ServiceCall) -> None:
         coordinator = _resolve_coordinator(hass, call)
         updates = _collect_updates(call)
-        # Per-event range/exactness check on the given data alone, before any
-        # BLE connection: catches the common invalid-schedule case (bad
-        # temperature) with zero BLE traffic. Constraints that depend on the
-        # device's existing schedule (chronological order after merging) can
-        # only be caught once the current program has been read — that path
-        # still raises ServiceValidationError, just after one GET instead of
-        # before it (coordinator.async_set_home_program).
+        # Everything checkable on the given events alone -- temperature range
+        # and 0.5 C steps, and chronological order -- is checked here, with zero
+        # BLE traffic. That is all of it: the merge fills a short day's
+        # remaining slots without ever putting them out of order
+        # (coordinator.merge_home_program), so a program that passes here is
+        # not refused later over slots the caller never wrote.
         for day_name, events in updates.items():
-            for event in events:
-                try:
-                    validate_home_program_event_temperature(round(float(event["temperature"]) * 10))
-                except ValidationError as exc:
-                    raise ServiceValidationError(f"{day_name}: {exc}") from exc
+            try:
+                validate_home_program_day(parse_home_program_events(events))
+            except ValidationError as exc:
+                raise ServiceValidationError(f"{day_name.capitalize()}: {exc}") from exc
         await coordinator.async_set_home_program(updates)
 
     hass.services.async_register(
@@ -209,7 +206,7 @@ def _resolve_coordinator(hass: HomeAssistant, call: ServiceCall) -> EB300Coordin
         )
 
     config_entry = hass.config_entries.async_get_entry(next(iter(config_entry_ids)))
-    if config_entry is None or not hasattr(config_entry, "runtime_data"):
+    if config_entry is None or config_entry.state is not ConfigEntryState.LOADED:
         raise ServiceValidationError("The targeted EB-Therm 300 thermostat is not loaded")
     return cast(EB300Coordinator, config_entry.runtime_data)
 

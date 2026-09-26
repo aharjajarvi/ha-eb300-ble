@@ -11,7 +11,7 @@
 > What that does *not* mean: it is not untested or unverified. Every feature
 > here was exercised against a real EB-Therm 300 — including the write paths,
 > run attended with device state snapshotted and restored — and the repo
-> carries 404 automated tests that run without hardware.
+> carries 439 automated tests that run without hardware.
 >
 > What it does mean: it has been validated by **one** person, on **two**
 > devices in one house — the reference device (firmware 1.2, batch 2603), on
@@ -54,7 +54,9 @@ Two things worth knowing:
 You can confirm a device is enabled before installing anything. The EB300's BLE
 advertisement carries an encryption-flags byte, and **bit 5 set means the Open
 API key is provisioned**. `tools/scan.py` in this repo decodes and prints
-exactly that, and needs no key of its own.
+exactly that, and needs no key of its own. (HACS installs only the integration;
+clone the repository to run the tools — see
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).)
 
 Paste the key into Home Assistant exactly as it arrives — **base64**, 44
 characters for 32 bytes. The config flow validates it with a real handshake
@@ -67,7 +69,7 @@ fails during setup rather than silently later.
 |---|---|
 | Home Assistant | **2026.8.0** or newer |
 | Radio | A Bluetooth adapter on the HA host, **or** an ESPHome Bluetooth proxy in range. Proxies are tested and work. |
-| Hardware | Ebeco EB-Therm 300. Developed against firmware 1.2, batch 2603. |
+| Hardware | Ebeco EB-Therm 300. Developed against firmware 1.2, batch 2603; also in daily use on firmware 1.3, batch 2606. |
 
 ---
 
@@ -75,10 +77,12 @@ fails during setup rather than silently later.
 
 ### HACS (recommended)
 
-1. HACS → three-dot menu → **Custom repositories**
-2. Repository: `https://github.com/aharjajarvi/ha-eb300-ble`, category:
-   **Integration**
-3. Download it, then restart Home Assistant.
+1. In HACS, search for **Ebeco EB-Therm 300 (BLE)**.
+2. Download it, then restart Home Assistant.
+
+If it does not show up in the search yet, add it as a custom repository first:
+HACS → three-dot menu → **Custom repositories**, repository
+`https://github.com/aharjajarvi/ha-eb300-ble`, category **Integration**.
 
 ### Manual
 
@@ -90,7 +94,9 @@ directory and restart.
 The thermostat is **discovered automatically** over Bluetooth — you should get
 a notification offering to configure it. If not, go to
 **Settings → Devices & Services → Add Integration → Ebeco EB-Therm 300** and
-pick it from the list of visible devices (or type its MAC).
+pick it from the list of thermostats Home Assistant's Bluetooth can see. If
+the list would be empty, setup stops with "No unconfigured EB-Therm 300 is
+visible" — see [Troubleshooting](#troubleshooting).
 
 Then paste the base64 PSK. That's the whole setup.
 
@@ -155,7 +161,7 @@ its own rather than retrying a key the device will never accept.
 | Option | Default | Notes |
 |---|---|---|
 | Poll interval | 300 s | 60–1800 s. Each poll is a full BLE connect; see [Bluetooth budget](#bluetooth-budget) before lowering it. |
-| Heating element wattage | 0 (off) | Enables the derived `Power` and `Energy` sensors. Both are created together, or not at all. |
+| Heating element wattage | 0 (off) | Enables the derived `Power` and `Energy` sensors. Both are created together, or not at all. Changing it later makes `Energy` jump once — see [below](#changing-the-wattage-later). |
 | Use room sensor for climate | off | By default the `climate` entity reports the **floor** sensor as current temperature. Turn this on if no floor sensor is wired. |
 
 ---
@@ -223,6 +229,16 @@ In the UI's event editor each row shows all three fields —
 `23:00:00 · 17 °C · false` — so a slot that has been switched off is visible
 without opening it. A row with no flag shown is active; that is the default
 when the key is omitted.
+
+The schedule day runs from **02:00 to 01:59**, so an event at 01:00 counts as
+coming after one at 23:00.
+
+A day given fewer than four events keeps the device's remaining slots, switched
+off, with their temperatures. If one of their times would now come before your
+last event, it is moved up to that event's time so the day stays in order —
+so the `saturday` example above is accepted whatever the thermostat held
+before. Events you give out of order are refused before anything is sent to the
+thermostat, with a message naming the day and the two events.
 
 Setting the schedule does **not** switch the thermostat into the Home program —
 change the `climate` entity's preset to `home` for that.
@@ -295,6 +311,17 @@ Both assume the element draws its rated wattage whenever the relay is closed,
 which is what a resistive heating cable does. Neither reacts to mains voltage,
 and an inaccurate wattage propagates straight through. If you want measured
 figures, a smart plug or an energy meter on the circuit is the answer.
+
+#### Changing the wattage later
+
+`Energy` is the thermostat's **lifetime** heating time multiplied by the
+wattage currently set, so changing the wattage changes the total in one step.
+Recorded history is not rewritten, but Home Assistant's statistics read that
+step as consumption: raising the wattage shows up as a one-off spike in the
+energy dashboard, and lowering it is read as a meter reset, which also spikes.
+
+To correct it: **Developer tools → Statistics**, find the `Energy` sensor, and
+use *Adjust sum* on the hour the wattage changed to remove the spike.
 
 ### No floor sensor installed: the floor reading goes `unknown`
 
@@ -382,10 +409,16 @@ problem. (The reverse *does* bite — see the next entry.)
 > exactly the situation that produces this, and it is easy to blame the
 > integration for it.
 
-**The device is never discovered.**
+**The device is never discovered, or setup says no thermostat is visible.**
 Confirm HA's Bluetooth integration is loaded and an adapter or proxy is in
-range. `tools/scan.py` can confirm the device is advertising and whether bit 5
-(Open API PSK provisioned) is set.
+range, and that the Ebeco app is closed (see above). `tools/scan.py` (clone
+the repository to run it) can confirm the device is advertising and whether
+bit 5 (Open API PSK provisioned) is set.
+
+**An entity shows `unknown` and the log mentions a value it "does not recognise".**
+The thermostat reported a setting — a display language, say — that this
+integration has no name for yet, probably from newer firmware. Only that entity
+is affected. Please open an issue with the log line and your firmware version.
 
 **Entities go unavailable, then come back.**
 Expected if the device is briefly out of reach. A failed poll does not
@@ -407,7 +440,7 @@ commands, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit,
 protocol, and [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md) for firmware
 behaviour found on real hardware.
 
-Two test suites, 404 tests, no thermostat required:
+Two test suites, 439 tests, no thermostat required:
 
 ```sh
 ./tests/lib/run.sh      # library: protocol, crypto, advertisements, client

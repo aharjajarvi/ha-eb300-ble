@@ -127,7 +127,7 @@ async def test_new_key_replaces_the_old_one_in_place(hass, validated, reconfigur
 
     # The key was validated against the entry's own device, and the address was
     # never re-asked.
-    assert validated.call_args.args[0] == ADDRESS
+    assert validated.call_args.args[1] == ADDRESS
 
 
 async def test_key_is_validated_before_it_is_stored(hass):

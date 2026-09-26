@@ -31,7 +31,7 @@ from eb300_ble.eb300_ble.const import Program
 from eb300_ble.eb300_ble.exceptions import EB300Error
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import Platform
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 ENTITY_ID = "climate.eb_therm_300_123456"
 
@@ -254,7 +254,7 @@ async def test_hvac_mode_maps_to_the_power_flag(entity, monkeypatch, mode, expec
 
 
 async def test_an_unsupported_hvac_mode_is_rejected(entity):
-    with pytest.raises(ValueError, match="Unsupported hvac_mode"):
+    with pytest.raises(ServiceValidationError, match="Unsupported hvac_mode"):
         await entity.async_set_hvac_mode(HVACMode.COOL)
 
 
@@ -269,7 +269,7 @@ async def test_preset_mode_maps_to_the_program(entity, monkeypatch, preset, expe
 
 
 async def test_an_unsupported_preset_mode_is_rejected(entity):
-    with pytest.raises(ValueError, match="Unsupported preset_mode"):
+    with pytest.raises(ServiceValidationError, match="Unsupported preset_mode"):
         await entity.async_set_preset_mode("away")
 
 

@@ -2,6 +2,7 @@
 import pytest
 from eb300_ble.const import DOMAIN
 from eb300_ble.services import _resolve_coordinator
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -14,6 +15,7 @@ SENTINEL = object()
 def _setup(hass):
     entry = MockConfigEntry(domain=DOMAIN, data={}, unique_id="AA:BB")
     entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     entry.runtime_data = SENTINEL
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -64,6 +66,7 @@ async def test_two_thermostats_rejected(hass):
     _, d1, _ = _setup(hass)
     e2 = MockConfigEntry(domain=DOMAIN, data={}, unique_id="CC:DD")
     e2.add_to_hass(hass)
+    e2.mock_state(hass, ConfigEntryState.LOADED)
     e2.runtime_data = object()
     d2 = dr.async_get(hass).async_get_or_create(
         config_entry_id=e2.entry_id,
@@ -72,6 +75,13 @@ async def test_two_thermostats_rejected(hass):
         "climate", DOMAIN, "CC:DD-climate", config_entry=e2, device_id=d2.id)
     with pytest.raises(ServiceValidationError, match="exactly one"):
         _resolve_coordinator(hass, _call(hass, {"device_id": [d1.id, d2.id]}))
+
+async def test_an_entry_that_failed_to_load_is_reported(hass):
+    """`runtime_data` can outlive a load, so the entry's state is what decides."""
+    entry, _, climate = _setup(hass)
+    entry.mock_state(hass, ConfigEntryState.SETUP_RETRY)
+    with pytest.raises(ServiceValidationError, match="not loaded"):
+        _resolve_coordinator(hass, _call(hass, {"entity_id": [climate.entity_id]}))
 
 async def test_unknown_device_rejected(hass):
     _setup(hass)

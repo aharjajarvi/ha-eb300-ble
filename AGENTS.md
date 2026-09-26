@@ -17,8 +17,8 @@ sync), and weekly schedule read/write via services.
 |---|---|
 | `custom_components/eb300_ble/` | The integration. **The only thing HACS ships.** |
 | `custom_components/eb300_ble/eb300_ble/` | The protocol library. **The only copy of it.** |
-| `tests/lib/` | Library suite, 108 tests, no `homeassistant` dependency |
-| `tests/ha/` | HA-glue suite, 296 tests, pinned `homeassistant` |
+| `tests/lib/` | Library suite, 112 tests, no `homeassistant` dependency |
+| `tests/ha/` | HA-glue suite, 327 tests, pinned `homeassistant` |
 | `tools/` | Hardware bring-up CLIs — need a real device |
 | `docs/` | ARCHITECTURE, PROTOCOL, HARDWARE_NOTES, DEVELOPMENT |
 
@@ -62,13 +62,12 @@ uv run --project tests/lib ruff check .
 uv run --project tests/lib mypy
 ```
 
-404 tests, all four clean. None of them need hardware.
+439 tests, all four clean. None of them need hardware.
 
 Coverage is worth checking before believing a path is tested — `./tests/ha/run.sh
 --cov=eb300_ble --cov-report=term-missing`. Everything under
-`custom_components/eb300_ble/*.py` is at 100% except `config_flow.py` (58%:
-discovery, manual entry and the options flow are untested; reauth/reconfigure
-are covered).
+`custom_components/eb300_ble/*.py` is at 100%. (Until 2026-09-26 this said
+so while the energy sensor's value was never computed by any test; it is now.)
 
 ## Code you should not casually refactor
 

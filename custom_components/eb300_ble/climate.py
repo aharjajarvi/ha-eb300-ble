@@ -2,9 +2,9 @@
 
 Writes go through PID 0x10D0 (Override Temperature) by default: it takes
 immediate effect regardless of the active program, matching what a user
-dragging the HA thermostat card slider expects. See the plan for why 0x1082
-(Manual Control Temp) was rejected as the default — it silently does nothing
-while the Home program is active.
+dragging the HA thermostat card slider expects. 0x1082 (Manual Control Temp)
+was rejected as the default because it silently does nothing while the Home
+program is active (docs/HARDWARE_NOTES.md).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import EB300ConfigEntry
@@ -130,8 +130,9 @@ class EB300Climate(EB300Entity, ClimateEntity):
         return HVACAction.HEATING if status.relay_on else HVACAction.IDLE
 
     @property
-    def preset_mode(self) -> str:
-        return self.coordinator.data.status.program.name.lower()
+    def preset_mode(self) -> str | None:
+        program = self.coordinator.data.program
+        return program.name.lower() if program is not None else None
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
@@ -165,10 +166,9 @@ class EB300Climate(EB300Entity, ClimateEntity):
             # connect can take a minute or more to exhaust its retries
             # (coordinator-level retries on top of bleak_retry_connector's own
             # internal ones), and HA shouldn't keep displaying an unapplied
-            # setpoint for that whole window. If the write succeeds shortly
-            # after, the coordinator's post-write refresh
-            # (async_set_override_temp -> async_request_refresh) overwrites
-            # this with the real, now-current value almost immediately.
+            # setpoint for that whole window. If the write succeeds, the
+            # coordinator's post-write poll (POST_WRITE_SETTLE_SECONDS later)
+            # replaces this with the value the device now holds.
             self._pending_temperature_c = None
             self.async_write_ha_state()
 
@@ -193,11 +193,11 @@ class EB300Climate(EB300Entity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode not in self._attr_hvac_modes:
-            raise ValueError(f"Unsupported hvac_mode {hvac_mode}")
+            raise ServiceValidationError(f"Unsupported hvac_mode {hvac_mode}")
         await self.coordinator.async_set_power(hvac_mode != HVACMode.OFF)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         program = _PRESET_TO_PROGRAM.get(preset_mode)
         if program is None:
-            raise ValueError(f"Unsupported preset_mode {preset_mode!r}")
+            raise ServiceValidationError(f"Unsupported preset_mode {preset_mode!r}")
         await self.coordinator.async_set_program(program)

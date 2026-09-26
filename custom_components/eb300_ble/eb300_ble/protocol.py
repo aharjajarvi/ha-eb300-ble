@@ -9,6 +9,7 @@ from __future__ import annotations
 import struct
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import TypedDict
 
 from .const import (
@@ -291,43 +292,69 @@ def unpack_home_program_event(data: bytes) -> HomeProgramEvent:
     return HomeProgramEvent(active=bool(active), hour=hour, minute=minute, temperature_decideg=s8_to_decideg(s8_temp))
 
 
+HOME_PROGRAM_DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+# The device's schedule day runs from 02:00 (daybreak) through 01:59 the
+# following clock-day, so an event at 01:00 sorts *after* one at 23:00.
+_DAYBREAK_HOUR = 2
+
+
+def home_program_event_minutes(event: HomeProgramEvent) -> int:
+    """Minutes since daybreak (02:00): the axis the device orders events on."""
+    return ((event.hour - _DAYBREAK_HOUR) % 24) * 60 + event.minute
+
+
+def validate_home_program_day(events: Sequence[HomeProgramEvent]) -> None:
+    """Raise ValidationError unless one day's events are each valid and in order.
+
+    Does not check the event count, so it also works on a partial day -- the
+    events a caller is about to merge onto the device's existing schedule.
+    Event numbers in messages are 1-based, as a person counts them.
+    """
+    for number, event in enumerate(events, start=1):
+        if not (0 <= event.hour <= 23):
+            raise ValidationError(f"event {number}: hour {event.hour} out of range 0..23")
+        if not (0 <= event.minute <= 59):
+            raise ValidationError(f"event {number}: minute {event.minute} out of range 0..59")
+        # Validated unconditionally, not just for active events -- an inactive
+        # event's temperature still reaches struct.pack (it's preserved through
+        # round-trips, since the device stores real values there), so an out-of-range
+        # value must be rejected here rather than escape as a bare struct.error.
+        try:
+            validate_home_program_event_temperature(event.temperature_decideg)
+        except ValidationError as exc:
+            raise ValidationError(f"event {number}: {exc}") from exc
+
+    # Chronological order within the day, including inactive events, compared on
+    # the daybreak-anchored timeline rather than raw hour:minute.
+    #
+    # Raw-clock "first >= 02:00" / "last <= 01:50" checks used to sit here too,
+    # but on the virtual timeline both are tautologies (>= 0 and <= 1430) — expressed
+    # in raw clock time they are actually mutually unsatisfiable for any day spanning
+    # a morning and an evening event, which is every realistic schedule, including the
+    # one the real device ships with. This ordering check is the only real constraint.
+    for number, (earlier, later) in enumerate(pairwise(events), start=1):
+        if home_program_event_minutes(earlier) > home_program_event_minutes(later):
+            raise ValidationError(
+                f"events must be in chronological order, but event {number} "
+                f"({earlier.hour:02d}:{earlier.minute:02d}) comes after event {number + 1} "
+                f"({later.hour:02d}:{later.minute:02d}). Inactive events count too, and "
+                "the schedule day runs from 02:00 to 01:59"
+            )
+
+
 def _validate_home_program(days: Sequence[Sequence[HomeProgramEvent]]) -> None:
     if len(days) != HOME_PROGRAM_DAYS:
         raise ValidationError(f"Home program must have {HOME_PROGRAM_DAYS} days, got {len(days)}")
-    for day_idx, day in enumerate(days):
+    for day_name, day in zip(HOME_PROGRAM_DAY_NAMES, days, strict=True):
         if len(day) != HOME_PROGRAM_EVENTS_PER_DAY:
             raise ValidationError(
-                f"Day {day_idx} must have exactly {HOME_PROGRAM_EVENTS_PER_DAY} events, got {len(day)}"
+                f"{day_name} must have exactly {HOME_PROGRAM_EVENTS_PER_DAY} events, got {len(day)}"
             )
-        for event_idx, event in enumerate(day):
-            if not (0 <= event.hour <= 23):
-                raise ValidationError(f"Day {day_idx} event {event_idx}: hour {event.hour} out of range 0..23")
-            if not (0 <= event.minute <= 59):
-                raise ValidationError(f"Day {day_idx} event {event_idx}: minute {event.minute} out of range 0..59")
-            # Validated unconditionally, not just for active events — an inactive
-            # event's temperature still reaches struct.pack (it's preserved through
-            # round-trips, since the device stores real values there), so an out-of-range
-            # value must be rejected here rather than escape as a bare struct.error.
-            try:
-                validate_home_program_event_temperature(event.temperature_decideg)
-            except ValidationError as exc:
-                raise ValidationError(f"Day {day_idx} event {event_idx}: {exc}") from exc
-
-        # Chronological order within the day, including inactive events. The device day
-        # runs from 02:00 (daybreak) through 01:50 the following clock-day, so compare on
-        # a virtual timeline anchored at 02:00 rather than raw hour:minute.
-        #
-        # Raw-clock "first >= 02:00" / "last <= 01:50" checks used to sit here too,
-        # but on the virtual timeline both are tautologies (>= 0 and <= 1430) — expressed
-        # in raw clock time they are actually mutually unsatisfiable for any day spanning
-        # a morning and an evening event, which is every realistic schedule, including the
-        # one the real device ships with. This ordering check is the only real constraint.
-        virtual_minutes = [((event.hour - 2) % 24) * 60 + event.minute for event in day]
-        for i in range(len(day) - 1):
-            if virtual_minutes[i] > virtual_minutes[i + 1]:
-                raise ValidationError(
-                    f"Day {day_idx}: events must be in chronological order (event {i} follows event {i + 1})"
-                )
+        try:
+            validate_home_program_day(day)
+        except ValidationError as exc:
+            raise ValidationError(f"{day_name}: {exc}") from exc
 
 
 def pack_home_program(days: Sequence[Sequence[HomeProgramEvent]]) -> bytes:

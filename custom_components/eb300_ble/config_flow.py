@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -17,27 +16,25 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.core import callback
+from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import format_mac
 
 from .const import (
+    CONF_POLL_INTERVAL,
     CONF_PSK,
+    CONF_RATED_WATTS,
     CONF_USE_ROOM_SENSOR,
-    DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_POLL_INTERVAL_SECONDS,
-    DEFAULT_SCAN_TIMEOUT,
     DOMAIN,
     MAX_POLL_INTERVAL_SECONDS,
     MIN_POLL_INTERVAL_SECONDS,
 )
-from .eb300_ble.client import BleakTransport, EB300Client
-from .eb300_ble.const import MANUFACTURER_ID
-from .eb300_ble.exceptions import EB300ConnectionError, HandshakeError
+from .coordinator import async_run_once, async_with_retries
+from .eb300_ble.client import EB300Client
+from .eb300_ble.const import MANUFACTURER_ID, SERVICE_DATA_ACCESS
+from .eb300_ble.exceptions import EB300Error, HandshakeError
 from .eb300_ble.models import DeviceInfo
-
-_LOGGER = logging.getLogger(__name__)
-
-CONF_ADDRESS = "address"
 
 
 class CannotConnect(Exception):
@@ -48,13 +45,25 @@ class InvalidAuth(Exception):
     """Handshake completed a connection but the PSK was rejected."""
 
 
-async def _validate_and_fetch_device_info(address: str, psk: bytes) -> DeviceInfo:
-    """Perform a real handshake + device-info read. Raises CannotConnect/InvalidAuth."""
-    transport = BleakTransport(address, scan_timeout=DEFAULT_SCAN_TIMEOUT)
-    client = EB300Client(transport, psk, request_timeout=DEFAULT_CONNECT_TIMEOUT)
-    try:
-        await client.connect()
+async def _validate_and_fetch_device_info(hass: HomeAssistant, address: str, psk: bytes) -> DeviceInfo:
+    """Perform a real handshake + device-info read. Raises CannotConnect/InvalidAuth.
+
+    Goes over the coordinator's own connection path (`async_run_once`): routed
+    through HA's Bluetooth manager, queued behind any poll already holding the
+    link, capped at BLE_OPERATION_TIMEOUT and retried once. Before this it
+    connected by bare address with none of that, so setting up an unreachable
+    thermostat could leave the form spinning -- and a proxy slot taken -- for
+    minutes.
+    """
+
+    async def _run_once(op: Callable[[EB300Client], Awaitable[DeviceInfo]]) -> DeviceInfo:
+        return await async_run_once(hass, address, psk, op)
+
+    async def _read_device_info(client: EB300Client) -> DeviceInfo:
         return await client.read_device_info()
+
+    try:
+        return await async_with_retries(_run_once, _read_device_info, address)
     except HandshakeError as exc:
         # A handshake that timed out or came back malformed is a connection
         # problem wearing an auth-shaped exception; only an outright rejection
@@ -64,10 +73,8 @@ async def _validate_and_fetch_device_info(address: str, psk: bytes) -> DeviceInf
         if exc.is_psk_rejection:
             raise InvalidAuth from exc
         raise CannotConnect from exc
-    except (EB300ConnectionError, TimeoutError) as exc:
+    except (EB300Error, TimeoutError) as exc:
         raise CannotConnect from exc
-    finally:
-        await client.disconnect()
 
 
 def _decode_psk(raw: str) -> bytes:
@@ -101,30 +108,32 @@ class EB300ConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self.async_step_psk()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Manual entry: pick from currently-visible EB300 devices, or type a MAC."""
+        """Manual entry: pick from the EB300 devices HA's Bluetooth can currently see."""
         if user_input is not None:
             self._discovered_address = user_input[CONF_ADDRESS]
             await self.async_set_unique_id(format_mac(self._discovered_address), raise_on_progress=False)
             self._abort_if_unique_id_configured()
             return await self.async_step_psk()
 
-        # Match on manufacturer ID, not name: HA/bleak has been observed reporting this
-        # device as "EBECO.EB300" rather than the "EB300" it actually broadcasts
-        # (docs/HARDWARE_NOTES.md), so a name-prefix filter is not reliable here.
-        current_addresses = self._async_current_ids()
+        # Match on what manifest.json's discovery matchers use (manufacturer ID
+        # or service UUID), not the name: HA/bleak has been observed reporting
+        # this device as "EBECO.EB300" rather than the "EB300" it actually
+        # broadcasts (docs/HARDWARE_NOTES.md), so a name-prefix filter is not
+        # reliable here.
+        current_addresses = self._async_current_ids(include_ignore=False)
         candidates = {
             info.address: f"{info.name or 'EB300'} ({info.address})"
             for info in async_discovered_service_info(self.hass, connectable=True)
-            if format_mac(info.address) not in current_addresses and MANUFACTURER_ID in info.manufacturer_data
+            if format_mac(info.address) not in current_addresses
+            and (MANUFACTURER_ID in info.manufacturer_data or SERVICE_DATA_ACCESS in info.service_uuids)
         }
+        # No free-text address fallback: validation connects through HA's
+        # Bluetooth manager, so a thermostat no scanner can see would fail at
+        # the key step anyway, after the user had already pasted the key.
+        if not candidates:
+            return self.async_abort(reason="no_devices_found")
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_ADDRESS): vol.In(candidates)
-                if candidates
-                else str,
-            }
-        )
+        schema = vol.Schema({vol.Required(CONF_ADDRESS): vol.In(candidates)})
         return self.async_show_form(step_id="user", data_schema=schema)
 
     async def async_step_psk(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -139,7 +148,7 @@ class EB300ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_PSK] = str(exc.error_message or "psk_not_base64")
             else:
                 try:
-                    device_info = await _validate_and_fetch_device_info(self._discovered_address, psk)
+                    device_info = await _validate_and_fetch_device_info(self.hass, self._discovered_address, psk)
                 except InvalidAuth:
                     errors["base"] = "invalid_auth"
                 except CannotConnect:
@@ -198,7 +207,7 @@ class EB300ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_PSK] = str(exc.error_message or "psk_not_base64")
             else:
                 try:
-                    await _validate_and_fetch_device_info(address, psk)
+                    await _validate_and_fetch_device_info(self.hass, address, psk)
                 except InvalidAuth:
                     errors["base"] = "invalid_auth"
                 except CannotConnect:
@@ -234,30 +243,31 @@ class EB300ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry) -> OptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return EB300OptionsFlow()
 
 
 class EB300OptionsFlow(OptionsFlow):
-    """Adjust the poll interval without reloading credentials."""
+    """Poll interval, heating element wattage, and which sensor the climate entity follows."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_interval = self.config_entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL_SECONDS)
-        current_watts = self.config_entry.options.get("rated_watts", 0)
+        current_interval = self.config_entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS)
+        current_watts = self.config_entry.options.get(CONF_RATED_WATTS, 0)
         current_use_room_sensor = self.config_entry.options.get(CONF_USE_ROOM_SENSOR, False)
         schema = vol.Schema(
             {
-                vol.Required("poll_interval", default=current_interval): vol.All(
+                vol.Required(CONF_POLL_INTERVAL, default=current_interval): vol.All(
                     vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
                 ),
                 # Optional (docs/ARCHITECTURE.md): 0 disables both derived
                 # entities — energy (kWh) and power (W) — since the device
                 # measures neither. Both are relay-on time or state multiplied
-                # by this number; see sensor.py.
-                vol.Optional("rated_watts", default=current_watts): vol.All(
+                # by this number; see sensor.py, including what a change to it
+                # does to the energy statistics.
+                vol.Optional(CONF_RATED_WATTS, default=current_watts): vol.All(
                     vol.Coerce(float), vol.Range(min=0, max=5000)
                 ),
                 # climate current_temperature uses the floor sensor by

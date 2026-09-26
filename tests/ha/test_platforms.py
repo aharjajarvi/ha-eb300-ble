@@ -252,3 +252,31 @@ async def test_the_problem_sensor_trips_on_a_flag_as_well_as_the_state_bit(hass,
     # True today by construction, and worth knowing if firmware ever adds one.
     loaded_entry.runtime_data.data = make_data(replace(make_status(), error_flags=0x0001))
     assert entity.is_on is False
+
+
+# --- a value the device sent that has no name here -----------------------
+
+
+async def test_unknown_device_values_read_unknown_and_nothing_else_breaks(hass, loaded_entry):
+    """A newer firmware adding a language or a program must cost the entities
+    that show it their value, not the device its availability. Written through
+    the coordinator for real, so every entity's state write runs."""
+    registry = er.async_get(hass)
+    from conftest import ADDRESS
+
+    def state(domain, key):
+        return hass.states.get(registry.async_get_entity_id(domain, "eb300_ble", f"{ADDRESS}_{key}"))
+
+    loaded_entry.runtime_data.async_set_updated_data(
+        make_data(make_status(current_program=5), key_lock=None, language=None, screensaver=None)
+    )
+    await hass.async_block_till_done()
+
+    assert state("switch", "key_lock").state == "unknown"
+    assert state("select", "language").state == "unknown"
+    assert state("select", "screensaver_type").state == "unknown"
+    assert state("sensor", "program").state == "unknown"
+    climate = state("climate", "thermostat")
+    assert climate.state == "heat"
+    assert climate.attributes["preset_mode"] is None
+    assert state("sensor", "room_temperature").state == "23.3"

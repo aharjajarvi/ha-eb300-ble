@@ -13,16 +13,17 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import (
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import EB300ConfigEntry
+from .const import CONF_RATED_WATTS
 from .coordinator import EB300Data
 from .entity import EB300Entity
 
@@ -100,7 +101,7 @@ SENSOR_DESCRIPTIONS: tuple[EB300SensorDescription, ...] = (
         translation_key="program",
         device_class=SensorDeviceClass.ENUM,
         options=["manual", "home"],
-        value_fn=lambda data: data.status.program.name.lower(),
+        value_fn=lambda data: data.program.name.lower() if data.program is not None else None,
     ),
     EB300SensorDescription(
         key="heating_time",
@@ -138,9 +139,16 @@ def _energy_description(rated_watts: float) -> EB300SensorDescription:
     def value_fn(data: EB300Data) -> float:
         # Derived, not read from the device: minutes of relay-on time x the
         # element wattage the user entered in options. Only registered when
-        # that option is set (see async_setup_entry below) — the plan marks
-        # this entity optional precisely because the device has no energy
-        # metering of its own.
+        # that option is set (see async_setup_entry below), because the device
+        # has no energy metering of its own.
+        #
+        # The device's lifetime counter x the *current* wattage, recomputed on
+        # every poll. Recorded history is never rewritten, but changing the
+        # wattage makes the value jump in one step, and HA's statistics count
+        # that jump as consumption (a drop reads as a meter reset). Accepted
+        # deliberately: it keeps the sensor a pure function of the device's own
+        # counter, and the README shows how to correct the one spike with
+        # Developer tools -> Statistics.
         return (data.status.energy_meter / 60) * rated_watts / 1000
 
     return EB300SensorDescription(
@@ -187,7 +195,7 @@ async def async_setup_entry(
 
     # One option, two derived entities: without a wattage neither has anything
     # to report, so both are created together or not at all.
-    rated_watts = entry.options.get("rated_watts")
+    rated_watts = entry.options.get(CONF_RATED_WATTS)
     if rated_watts:
         entities.append(EB300Sensor(coordinator, _energy_description(float(rated_watts))))
         entities.append(EB300Sensor(coordinator, _power_description(float(rated_watts))))

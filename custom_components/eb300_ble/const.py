@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 DOMAIN = "eb300_ble"
 
 CONF_PSK = "psk"  # base64-encoded 32-byte PSK, stored only in the config entry
+
+# Options
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_RATED_WATTS = "rated_watts"
+CONF_USE_ROOM_SENSOR = "use_room_sensor"
 
 DEFAULT_POLL_INTERVAL_SECONDS = 300
 MIN_POLL_INTERVAL_SECONDS = 60
 MAX_POLL_INTERVAL_SECONDS = 1800
 
 DEFAULT_SCAN_TIMEOUT = 10.0
-DEFAULT_CONNECT_TIMEOUT = 20.0
+# How long to wait for each handshake step and each request's response.
+REQUEST_TIMEOUT_SECONDS = 20.0
 
-# R-13 (docs/HARDWARE_NOTES.md): measured ~6% single-attempt BLE connect
+# docs/HARDWARE_NOTES.md: measured ~6% single-attempt BLE connect
 # timeout rate on real hardware. One retry drops the compound failure rate
 # to ~0.36% — required for the coordinator to hit a reasonable reliability
 # bar, not just a nice-to-have.
@@ -55,19 +59,9 @@ BLE_CONNECT_MAX_ATTEMPTS = 2
 # 2 x 45s rather than open-ended.
 BLE_OPERATION_TIMEOUT = 45.0
 
-# Connection slots on a BLE proxy are the scarce shared resource across
-# every BLE integration in the house, not just this one — serialize this
-# integration's own connections so multiple eb300_ble devices never contend
-# with each other for the same slot.
-_CONNECTION_SEMAPHORE_LIMIT = 1
-
 MIN_TARGET_TEMP_C = 5.0
 MAX_TARGET_TEMP_C = 35.0
 TARGET_TEMP_STEP_C = 0.5
-
-UPDATE_INTERVAL = timedelta(seconds=DEFAULT_POLL_INTERVAL_SECONDS)
-
-CONF_USE_ROOM_SENSOR = "use_room_sensor"
 
 # Dragging the HA slider fires a burst of set_temperature calls —
 # coalesce them into one BLE write, sent this long after the last one.

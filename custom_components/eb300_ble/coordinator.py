@@ -8,6 +8,7 @@ import struct
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import IntEnum
 from typing import Any, TypeVar
 
 from homeassistant.components import bluetooth
@@ -21,19 +22,31 @@ from .const import (
     BLE_CONNECT_MAX_ATTEMPTS,
     BLE_OPERATION_TIMEOUT,
     CONNECT_RETRY_ATTEMPTS,
-    DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_SCAN_TIMEOUT,
     POST_WRITE_SETTLE_SECONDS,
+    REQUEST_TIMEOUT_SECONDS,
     WEEKDAYS,
 )
 from .eb300_ble.client import BleakTransport, EB300Client
 from .eb300_ble.const import PID, KeyLock, Language, Operation, Program, ScreensaverType
-from .eb300_ble.exceptions import EB300ConnectionError, EB300Error, HandshakeError, ValidationError
+from .eb300_ble.exceptions import (
+    EB300ConnectionError,
+    EB300Error,
+    HandshakeError,
+    ProtocolError,
+    ValidationError,
+)
 from .eb300_ble.models import DeviceInfo as EB300DeviceInfo
 from .eb300_ble.models import HomeProgram, ThermostatStatus
-from .eb300_ble.protocol import HOME_PROGRAM_EVENTS_PER_DAY, HomeProgramEvent
+from .eb300_ble.protocol import (
+    HOME_PROGRAM_EVENTS_PER_DAY,
+    HomeProgramEvent,
+    InnerMessage,
+    home_program_event_minutes,
+)
 
 _T = TypeVar("_T")
+_E = TypeVar("_E", bound=IntEnum)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,14 +62,33 @@ _CONNECTION_SEMAPHORE = asyncio.Semaphore(1)
 
 @dataclass(slots=True)
 class EB300Data:
+    """One poll's worth of device state.
+
+    The three config enums are `None` when the device reports a value this
+    integration has no name for -- a newer firmware adding a display language,
+    say. The entity that shows it reads `unknown`; every other entity carries on.
+    """
+
     status: ThermostatStatus
     device_info: EB300DeviceInfo
     rssi: int | None
-    key_lock: KeyLock
-    language: Language
-    screensaver: ScreensaverType
+    key_lock: KeyLock | None
+    language: Language | None
+    screensaver: ScreensaverType | None
     calibration_room_decideg: int
     calibration_floor_decideg: int
+
+    @property
+    def program(self) -> Program | None:
+        """The active program, or `None` for a program number with no name here.
+
+        `ThermostatStatus.program` raises on an unknown number instead, which is
+        right for the bring-up tools but would fail every entity's state write.
+        """
+        try:
+            return Program(self.status.current_program)
+        except ValueError:
+            return None
 
 
 class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
@@ -84,6 +116,9 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
         # every cycle.
         self._device_info: EB300DeviceInfo | None = None
         self._unsub_settle_refresh: CALLBACK_TYPE | None = None
+        # (setting, raw value) pairs already logged, so an unknown value is
+        # reported once per HA run rather than on every poll.
+        self._reported_unknown: set[tuple[str, int]] = set()
 
     async def async_shutdown(self) -> None:
         self._cancel_settle_refresh()
@@ -124,21 +159,58 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
                 (Operation.GET, PID.CALIBRATION_USER, b""),
             ]
         )
-        room_decideg, floor_decideg, _relay_decideg = struct.unpack("<hhh", calibration_resp.data)
+        # Room and floor only: the triplet's third value is the relay offset,
+        # which the device forces to 0 and nothing here uses.
+        if len(calibration_resp.data) < 4:
+            raise ProtocolError(f"Calibration payload too short: {len(calibration_resp.data)} < 4 bytes")
+        room_decideg, floor_decideg = struct.unpack_from("<hh", calibration_resp.data)
 
         service_info = bluetooth.async_last_service_info(self.hass, self.address, connectable=True)
         rssi = service_info.rssi if service_info else None
 
         assert self._device_info is not None
-        return EB300Data(
+        data = EB300Data(
             status=status,
             device_info=self._device_info,
             rssi=rssi,
-            key_lock=KeyLock(key_lock_resp.data[0]),
-            language=Language(language_resp.data[0]),
-            screensaver=ScreensaverType(screensaver_resp.data[0]),
+            key_lock=self._known(KeyLock, "key lock", key_lock_resp),
+            language=self._known(Language, "language", language_resp),
+            screensaver=self._known(ScreensaverType, "screensaver", screensaver_resp),
             calibration_room_decideg=room_decideg,
             calibration_floor_decideg=floor_decideg,
+        )
+        if data.program is None:
+            self._report_unknown("program", status.current_program)
+        return data
+
+    def _known(self, enum: type[_E], setting: str, response: InnerMessage) -> _E | None:
+        """Decode a one-byte setting, or `None` if the device sent a value with no name here.
+
+        An empty payload is a malformed response and fails the poll like any
+        other protocol error. An unknown value is not: before this, one
+        unrecognised byte raised a bare `ValueError` out of `_poll`, and HA
+        marked every entity of the device unavailable over one setting.
+        """
+        if not response.data:
+            raise ProtocolError(f"Empty {setting} payload")
+        raw = response.data[0]
+        try:
+            return enum(raw)
+        except ValueError:
+            self._report_unknown(setting, raw)
+            return None
+
+    def _report_unknown(self, setting: str, raw: int) -> None:
+        if (setting, raw) in self._reported_unknown:
+            return
+        self._reported_unknown.add((setting, raw))
+        _LOGGER.warning(
+            "%s reported %s %d, which this integration does not recognise; that entity "
+            "shows unknown until it does. Please report it at "
+            "https://github.com/aharjajarvi/ha-eb300-ble/issues with the firmware version",
+            self.address,
+            setting,
+            raw,
         )
 
     # ── Writes ────────────────────────────────────────────────────────────
@@ -222,7 +294,10 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
             ) from exc
         except EB300Error as exc:
             raise HomeAssistantError(f"Could not write to {self.address}: {exc}") from exc
-        await self.async_request_refresh()
+        # Same delayed poll as every other write: in the Home program a new
+        # schedule can change the setpoint in force, and a read made straight
+        # after a SET still returns the old one.
+        self._schedule_settle_refresh()
 
     async def _write(self, op: Callable[[EB300Client], Awaitable[None]]) -> None:
         """SET, then poll once POST_WRITE_SETTLE_SECONDS later.
@@ -272,53 +347,72 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
     # ── Shared connect/retry plumbing ────────────────────────────────────
 
     async def _with_client(self, op: Callable[[EB300Client], Awaitable[_T]]) -> _T:
-        last_error: Exception | None = None
-        for attempt in range(1, CONNECT_RETRY_ATTEMPTS + 1):
-            try:
-                return await self._run_once(op)
-            except (EB300Error, TimeoutError) as exc:
-                last_error = exc
-                _LOGGER.debug(
-                    "Attempt %d/%d for %s failed: %s", attempt, CONNECT_RETRY_ATTEMPTS, self.address, exc
-                )
-                if isinstance(exc, HandshakeError) and exc.is_psk_rejection:
-                    # Nothing to retry: the device has refused this key, and two
-                    # more attempts only burn shared BLE connection slots before
-                    # failing the same way.
-                    break
-        assert last_error is not None
-        raise last_error
+        return await async_with_retries(self._run_once, op, self.address)
 
     async def _run_once(self, op: Callable[[EB300Client], Awaitable[_T]]) -> _T:
-        # Resolve through HA's own Bluetooth manager, not our own scan: it
-        # already tracks every proxy (both of them, in this house) and their
-        # signal quality, and routes to the best one. Passing a bare address
-        # to BleakTransport would make it do its own uncoordinated
-        # BleakScanner.find_device_by_address() instead — the exact pattern
-        # habluetooth's "connect() called without bleak-retry-connector"-style
-        # warnings exist to catch (docs/HARDWARE_NOTES.md).
-        ble_device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True)
-        if ble_device is None:
-            raise EB300ConnectionError(f"{self.address} not currently visible to any Bluetooth scanner")
+        return await async_run_once(self.hass, self.address, self._psk, op)
 
-        async with _CONNECTION_SEMAPHORE:
-            transport = BleakTransport(
-                ble_device, scan_timeout=DEFAULT_SCAN_TIMEOUT, max_attempts=BLE_CONNECT_MAX_ATTEMPTS
-            )
-            client = EB300Client(transport, self._psk, request_timeout=DEFAULT_CONNECT_TIMEOUT)
-            try:
-                # Timeout inside the semaphore, not around it: an operation
-                # queued behind another one must not be charged for the time it
-                # spent waiting its turn. Disconnect stays outside the scope so
-                # teardown always runs. TimeoutError is already retryable in
-                # _with_client, so a timed-out attempt still gets its second
-                # chance. See BLE_OPERATION_TIMEOUT in const.py for why this is
-                # the only lever available here.
-                async with asyncio.timeout(BLE_OPERATION_TIMEOUT):
-                    await client.connect()
-                    return await op(client)
-            finally:
-                await client.disconnect()
+
+# Module level rather than coordinator methods so the config flow validates a
+# key over exactly the same path the coordinator polls over: the same HA-routed
+# connection, the same one-at-a-time lock and the same time limit. A setup
+# attempt against an unreachable thermostat is otherwise the one operation
+# free to hold a proxy slot for minutes.
+
+
+async def async_with_retries(
+    run_once: Callable[[Callable[[EB300Client], Awaitable[_T]]], Awaitable[_T]],
+    op: Callable[[EB300Client], Awaitable[_T]],
+    address: str,
+) -> _T:
+    """Run `op` over a fresh connection, retrying up to CONNECT_RETRY_ATTEMPTS times."""
+    last_error: Exception | None = None
+    for attempt in range(1, CONNECT_RETRY_ATTEMPTS + 1):
+        try:
+            return await run_once(op)
+        except (EB300Error, TimeoutError) as exc:
+            last_error = exc
+            _LOGGER.debug("Attempt %d/%d for %s failed: %s", attempt, CONNECT_RETRY_ATTEMPTS, address, exc)
+            if isinstance(exc, HandshakeError) and exc.is_psk_rejection:
+                # Nothing to retry: the device has refused this key, and two
+                # more attempts only burn shared BLE connection slots before
+                # failing the same way.
+                break
+    assert last_error is not None
+    raise last_error
+
+
+async def async_run_once(
+    hass: HomeAssistant, address: str, psk: bytes, op: Callable[[EB300Client], Awaitable[_T]]
+) -> _T:
+    """Connect, hand the client to `op`, disconnect. One attempt."""
+    # Resolve through HA's own Bluetooth manager, not our own scan: it
+    # already tracks every proxy (both of them, in this house) and their
+    # signal quality, and routes to the best one. Passing a bare address
+    # to BleakTransport would make it do its own uncoordinated
+    # BleakScanner.find_device_by_address() instead — the exact pattern
+    # habluetooth's "connect() called without bleak-retry-connector"-style
+    # warnings exist to catch (docs/HARDWARE_NOTES.md).
+    ble_device = bluetooth.async_ble_device_from_address(hass, address, connectable=True)
+    if ble_device is None:
+        raise EB300ConnectionError(f"{address} not currently visible to any Bluetooth scanner")
+
+    async with _CONNECTION_SEMAPHORE:
+        transport = BleakTransport(ble_device, scan_timeout=DEFAULT_SCAN_TIMEOUT, max_attempts=BLE_CONNECT_MAX_ATTEMPTS)
+        client = EB300Client(transport, psk, request_timeout=REQUEST_TIMEOUT_SECONDS)
+        try:
+            # Timeout inside the semaphore, not around it: an operation
+            # queued behind another one must not be charged for the time it
+            # spent waiting its turn. Disconnect stays outside the scope so
+            # teardown always runs. TimeoutError is retryable in
+            # async_with_retries, so a timed-out attempt still gets its second
+            # chance. See BLE_OPERATION_TIMEOUT in const.py for why this is
+            # the only lever available here.
+            async with asyncio.timeout(BLE_OPERATION_TIMEOUT):
+                await client.connect()
+                return await op(client)
+        finally:
+            await client.disconnect()
 
 
 def merge_home_program(current: HomeProgram, updates: Mapping[str, Sequence[Mapping[str, Any]]]) -> HomeProgram:
@@ -328,15 +422,23 @@ def merge_home_program(current: HomeProgram, updates: Mapping[str, Sequence[Mapp
     - Given events default to `active=True`; pass `active: false` to keep a slot's
       time and temperature but stop it firing. An inactive event still needs a
       valid, in-order time, since the ordering check spans inactive events too.
-    - A day given fewer than 4 events keeps the device's own existing time and
-      temperature for the remaining slots (marked inactive), falling back to
-      repeating the last given event's values if the existing day is
-      (unexpectedly) shorter than 4 events.
+    - A day given fewer than 4 events fills the remaining slots as inactive,
+      keeping the device's own existing temperature and, where it still falls
+      in order, its existing time. An existing time that would now come
+      *before* the slot ahead of it takes that slot's time instead: the
+      device checks order across inactive slots too, and the user never wrote
+      those slots, so they must not be what makes a valid edit fail. A device
+      day that is (unexpectedly) shorter than 4 events repeats the previous
+      slot's values.
+
+    The padding never introduces a disorder, so an order violation in the
+    result always comes from the events the caller gave -- which
+    `validate_home_program_day` can catch before any connection is made.
 
     Raises `eb300_ble.exceptions.ValidationError` — via `HomeProgram.to_bytes()`
     inside `EB300Client.set_home_program`, not here — if the merged result
-    violates a device constraint (e.g. chronological order); this function
-    itself only validates that a day was not given more than 4 events.
+    violates a device constraint; this function itself only validates that a
+    day was not given more than 4 events.
     """
     new_days = list(current.days)
     for day_idx, day_name in enumerate(WEEKDAYS):
@@ -348,18 +450,7 @@ def merge_home_program(current: HomeProgram, updates: Mapping[str, Sequence[Mapp
                 f"{day_name}: at most {HOME_PROGRAM_EVENTS_PER_DAY} events allowed, got {len(given)}"
             )
         existing_day = current.days[day_idx]
-        new_events: list[HomeProgramEvent] = []
-        for item in given:
-            hour, minute = _parse_hh_mm(str(item["time"]))
-            temperature_decideg = round(float(item["temperature"]) * 10)
-            new_events.append(
-                HomeProgramEvent(
-                    active=bool(item.get("active", True)),
-                    hour=hour,
-                    minute=minute,
-                    temperature_decideg=temperature_decideg,
-                )
-            )
+        new_events = parse_home_program_events(given)
         for i in range(len(given), HOME_PROGRAM_EVENTS_PER_DAY):
             if i < len(existing_day):
                 source = existing_day[i]
@@ -367,16 +458,35 @@ def merge_home_program(current: HomeProgram, updates: Mapping[str, Sequence[Mapp
                 source = new_events[-1]
             else:
                 source = HomeProgramEvent(active=False, hour=0, minute=0, temperature_decideg=0)
+            hour, minute = source.hour, source.minute
+            if new_events and home_program_event_minutes(source) < home_program_event_minutes(new_events[-1]):
+                hour, minute = new_events[-1].hour, new_events[-1].minute
             new_events.append(
                 HomeProgramEvent(
                     active=False,
-                    hour=source.hour,
-                    minute=source.minute,
+                    hour=hour,
+                    minute=minute,
                     temperature_decideg=source.temperature_decideg,
                 )
             )
         new_days[day_idx] = new_events
     return HomeProgram(days=new_days)
+
+
+def parse_home_program_events(given: Sequence[Mapping[str, Any]]) -> list[HomeProgramEvent]:
+    """Service-call events (already schema-validated) -> `HomeProgramEvent`s, in order."""
+    events: list[HomeProgramEvent] = []
+    for item in given:
+        hour, minute = _parse_hh_mm(str(item["time"]))
+        events.append(
+            HomeProgramEvent(
+                active=bool(item.get("active", True)),
+                hour=hour,
+                minute=minute,
+                temperature_decideg=round(float(item["temperature"]) * 10),
+            )
+        )
+    return events
 
 
 def _parse_hh_mm(value: str) -> tuple[int, int]:

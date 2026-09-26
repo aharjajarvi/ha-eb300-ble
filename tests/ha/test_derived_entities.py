@@ -53,6 +53,27 @@ async def _created_keys(options):
     return [entity.entity_description.key for entity in created]
 
 
+# --- the energy sensor ----------------------------------------------------
+
+
+def _energy_value(watts=RATED_WATTS):
+    return sensor._energy_description(watts).value_fn(_Data(relay_on=False))
+
+
+def test_energy_is_the_devices_relay_on_time_times_the_wattage():
+    """120 relay-on minutes at 1200 W is 2 h x 1.2 kW = 2.4 kWh."""
+    assert _energy_value() == pytest.approx(2.4)
+
+
+def test_energy_is_a_pure_function_of_the_device_counter():
+    """Deliberate, and documented in the README: a new wattage applies to the
+    whole lifetime counter, so the total jumps once when the option changes.
+    Past recorded states are untouched; the one jump in the statistics is fixed
+    by hand. The alternative -- a running total kept in HA -- would no longer be
+    derived from the device's own counter."""
+    assert _energy_value(watts=600.0) == pytest.approx(_energy_value() / 2)
+
+
 # --- the power sensor -----------------------------------------------------
 
 def _power_value(relay_on, watts=RATED_WATTS):

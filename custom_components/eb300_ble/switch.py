@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import EB300ConfigEntry
@@ -29,8 +29,9 @@ async def async_setup_entry(
 
 class EB300KeyLockSwitch(EB300Entity, SwitchEntity):
     @property
-    def is_on(self) -> bool:
-        return self.coordinator.data.key_lock == KeyLock.LOCKED
+    def is_on(self) -> bool | None:
+        key_lock = self.coordinator.data.key_lock
+        return key_lock is KeyLock.LOCKED if key_lock is not None else None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_key_lock(True)

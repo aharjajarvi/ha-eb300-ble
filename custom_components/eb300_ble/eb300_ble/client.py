@@ -157,7 +157,7 @@ class BleakTransport:
         if self._client is None:
             raise EB300ConnectionError("Transport not connected")
         # Data Stream RX only advertises the "write" (with response) GATT property,
-        # not "write-without-response" (confirmed via H-2 GATT discovery on real
+        # not "write-without-response" (confirmed by GATT discovery on real
         # hardware) — forcing response=False here silently drops writes.
         try:
             await self._client.write_gatt_char(CHAR_DATA_STREAM_RX, data, response=True)

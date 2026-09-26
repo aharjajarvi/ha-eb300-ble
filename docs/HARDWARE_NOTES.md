@@ -127,7 +127,8 @@ broken one.
 
 The device broadcasts `EB300`; HA/bleak has been observed reporting it as
 `EBECO.EB300`. **Do not match on the name.** The config flow matches on
-manufacturer ID (`0x0F93`) instead.
+manufacturer ID (`0x0F93`) or the Open API service UUID instead, the same as
+the discovery matchers in `manifest.json`.
 
 ---
 

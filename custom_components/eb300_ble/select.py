@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import IntEnum
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import EB300ConfigEntry
@@ -19,9 +20,14 @@ _LANGUAGE_OPTIONS = [member.name.lower() for member in Language]
 _SCREENSAVER_OPTIONS = [member.name.lower() for member in ScreensaverType]
 
 
+def _option(value: IntEnum | None) -> str | None:
+    """`None` (shown as unknown) for a value the device sent that has no name here."""
+    return value.name.lower() if value is not None else None
+
+
 @dataclass(frozen=True, kw_only=True)
 class EB300SelectDescription(SelectEntityDescription):
-    current_fn: Callable[[EB300Data], str]
+    current_fn: Callable[[EB300Data], str | None]
     select_fn: Callable[[EB300Coordinator, str], Awaitable[None]]
 
 
@@ -31,7 +37,7 @@ SELECT_DESCRIPTIONS: tuple[EB300SelectDescription, ...] = (
         translation_key="language",
         entity_category=EntityCategory.CONFIG,
         options=_LANGUAGE_OPTIONS,
-        current_fn=lambda data: data.language.name.lower(),
+        current_fn=lambda data: _option(data.language),
         select_fn=lambda coordinator, option: coordinator.async_set_language(Language[option.upper()]),
     ),
     EB300SelectDescription(
@@ -39,7 +45,7 @@ SELECT_DESCRIPTIONS: tuple[EB300SelectDescription, ...] = (
         translation_key="screensaver_type",
         entity_category=EntityCategory.CONFIG,
         options=_SCREENSAVER_OPTIONS,
-        current_fn=lambda data: data.screensaver.name.lower(),
+        current_fn=lambda data: _option(data.screensaver),
         select_fn=lambda coordinator, option: coordinator.async_set_screensaver(ScreensaverType[option.upper()]),
     ),
 )
@@ -56,7 +62,7 @@ class EB300Select(EB300Entity, SelectEntity):
     entity_description: EB300SelectDescription
 
     @property
-    def current_option(self) -> str:
+    def current_option(self) -> str | None:
         return self.entity_description.current_fn(self.coordinator.data)
 
     async def async_select_option(self, option: str) -> None:

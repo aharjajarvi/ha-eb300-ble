@@ -310,7 +310,11 @@ async def test_a_readback_that_does_not_match_is_reported(hass):
         await coordinator.async_set_home_program({"monday": [{"time": "06:00", "temperature": 22.0}]})
 
 
-async def test_a_verified_program_write_asks_for_a_fresh_poll(hass):
+async def test_a_verified_program_write_polls_after_the_settle_delay(hass):
+    """Not an immediate refresh: in the Home program a new schedule can change
+    the setpoint in force, and a status read straight after a SET still returns
+    the old one -- the same reason every other write waits
+    POST_WRITE_SETTLE_SECONDS (docs/HARDWARE_NOTES.md)."""
     coordinator = _coordinator(hass)
     updates = {"monday": [{"time": "06:00", "temperature": 22.0}]}
     merged = merge_home_program(_program(), updates)
@@ -318,12 +322,14 @@ async def test_a_verified_program_write_asks_for_a_fresh_poll(hass):
 
     with (
         patch.object(EB300Coordinator, "_with_client", _with_client_running(client)),
-        patch.object(EB300Coordinator, "async_request_refresh", AsyncMock()) as refresh,
+        patch.object(EB300Coordinator, "async_request_refresh", AsyncMock()) as immediate,
+        patch.object(EB300Coordinator, "_schedule_settle_refresh") as settle,
     ):
         await coordinator.async_set_home_program(updates)
 
     client.set_home_program.assert_awaited_once()
-    refresh.assert_awaited_once()
+    settle.assert_called_once_with()
+    immediate.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -358,21 +364,92 @@ def _response(payload: bytes):
     return MagicMock(data=payload)
 
 
-def _polling_client():
+_CALIBRATION = struct.pack("<hhh", 5, -3, 0)
+
+
+def _polling_client(
+    *,
+    key_lock=bytes([KeyLock.LOCKED]),
+    language=bytes([Language.FINNISH]),
+    screensaver=bytes([ScreensaverType.TEMPERATURE]),
+    calibration=_CALIBRATION,
+    status=None,
+):
     client = MagicMock()
     client.read_device_info = AsyncMock(
         return_value=DeviceInfo(model="EB-Therm 300", batch="2603", serial="123456", firmware_version="1.2")
     )
-    client.read_status = AsyncMock(return_value=make_status())
+    client.read_status = AsyncMock(return_value=status if status is not None else make_status())
     client.request_batch = AsyncMock(
-        return_value=[
-            _response(bytes([KeyLock.LOCKED])),
-            _response(bytes([Language.FINNISH])),
-            _response(bytes([ScreensaverType.TEMPERATURE])),
-            _response(struct.pack("<hhh", 5, -3, 0)),
-        ]
+        return_value=[_response(key_lock), _response(language), _response(screensaver), _response(calibration)]
     )
     return client
+
+
+async def _poll_once(hass, client, coordinator=None):
+    coordinator = coordinator or _coordinator(hass)
+    with (
+        patch.object(EB300Coordinator, "_with_client", _with_client_running(client)),
+        patch("eb300_ble.coordinator.bluetooth.async_last_service_info", return_value=None),
+    ):
+        return await coordinator._async_update_data()
+
+
+# --- `_poll`: a value with no name here costs one entity, not the device ----
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("key_lock", {"key_lock": b"\x07"}),
+        ("language", {"language": b"\x09"}),
+        ("screensaver", {"screensaver": b"\x0a"}),
+    ],
+)
+async def test_an_unknown_setting_value_reads_as_none_and_the_poll_succeeds(hass, field, kwargs):
+    """A firmware that adds a display language must not take every entity of the
+    device unavailable: before this, `Language(9)` raised a bare `ValueError` out
+    of `_poll`, which HA logs as an unexpected error and fails the whole update."""
+    data = await _poll_once(hass, _polling_client(**kwargs))
+
+    assert getattr(data, field) is None
+    # the rest of the poll is intact
+    assert data.status.current_set_temperature == 200
+    assert (data.calibration_room_decideg, data.calibration_floor_decideg) == (5, -3)
+
+
+async def test_an_unknown_program_reads_as_none(hass):
+    data = await _poll_once(hass, _polling_client(status=make_status(current_program=5)))
+
+    assert data.program is None
+    assert data.status.current_program == 5
+
+
+async def test_an_unknown_value_is_logged_once_not_every_poll(hass, caplog):
+    coordinator = _coordinator(hass)
+    client = _polling_client(language=b"\x09")
+
+    await _poll_once(hass, client, coordinator)
+    await _poll_once(hass, client, coordinator)
+
+    warnings = [r for r in caplog.records if "does not recognise" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "language 9" in warnings[0].getMessage()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"language": b""}, {"calibration": b"\x05\x00"}],
+    ids=["empty setting", "short calibration"],
+)
+async def test_a_malformed_config_payload_fails_the_poll_cleanly(hass, kwargs):
+    """Malformed is different from unknown: it is a protocol error, and it fails
+    the poll as `UpdateFailed` like any other -- not as a bare IndexError or
+    struct.error that HA reports as an integration bug."""
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    with pytest.raises(UpdateFailed):
+        await _poll_once(hass, _polling_client(**kwargs))
 
 
 async def test_a_poll_assembles_every_field_from_its_own_response(hass):
@@ -466,6 +543,53 @@ def test_a_short_day_keeps_the_devices_own_values_for_the_rest():
         active=False, hour=15, minute=0, temperature_decideg=220
     )
     assert merged.days[1] == current.days[1]  # tuesday untouched
+
+
+def test_a_short_day_never_puts_the_padded_slots_out_of_order():
+    """The README's own example, against a normal 4-event day. The device day
+    here is 06:00 / 08:00 / 15:00 / 23:00; the edit gives 08:00 and 23:30. Slot
+    3's existing 15:00 now falls before the given 23:30 -- padding it with the
+    existing time put the day out of order, and the device refused an edit whose
+    every given event was valid, naming slots the user never wrote."""
+    merged = merge_home_program(
+        _program(),
+        {"saturday": [{"time": "08:00", "temperature": 22.0}, {"time": "23:30", "temperature": 17.0}]},
+    )
+
+    saturday = merged.days[5]
+    assert [(e.active, e.hour, e.minute) for e in saturday] == [
+        (True, 8, 0),
+        (True, 23, 30),
+        (False, 23, 30),  # was 15:00: clamped up to the slot ahead of it
+        (False, 23, 30),  # was 23:00: likewise
+    ]
+    # the device's own temperatures are kept, only the times move
+    assert [e.temperature_decideg for e in saturday[2:]] == [220, 170]
+    assert merged.to_bytes()
+
+
+def test_a_padded_slot_that_is_still_in_order_keeps_its_own_time():
+    """Clamping is only for slots that would otherwise break the order."""
+    merged = merge_home_program(_program(), {"monday": [{"time": "05:00", "temperature": 21.0}]})
+
+    assert [(e.hour, e.minute) for e in merged.days[0]] == [(5, 0), (8, 0), (15, 0), (23, 0)]
+    assert merged.to_bytes()
+
+
+def test_padding_respects_the_0200_daybreak():
+    """01:00 is the *end* of the schedule day, so an existing 23:00 slot after a
+    given 01:00 is out of order and gets clamped -- to 01:00, not left at 23:00."""
+    merged = merge_home_program(
+        _program(),
+        {"monday": [
+            {"time": "06:00", "temperature": 22.0},
+            {"time": "22:00", "temperature": 17.0},
+            {"time": "01:00", "temperature": 16.0},
+        ]},
+    )
+
+    assert (merged.days[0][3].hour, merged.days[0][3].minute) == (1, 0)
+    assert merged.to_bytes()
 
 
 def test_a_short_day_over_a_short_existing_day_repeats_the_last_given_event():

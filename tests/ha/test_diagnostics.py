@@ -97,3 +97,14 @@ async def test_a_faulted_sensor_shows_up_in_the_payload(hass, loaded_entry):
 
     assert payload["last_status"]["floor_sensor_error"] == "open_circuit"
     assert payload["last_status"]["room_sensor_error"] == "ok"
+
+
+async def test_unknown_device_values_do_not_break_the_download(hass, loaded_entry):
+    loaded_entry.runtime_data.data = make_data(
+        make_status(current_program=5), key_lock=None, language=None, screensaver=None
+    )
+    payload = await async_get_config_entry_diagnostics(hass, loaded_entry)
+
+    assert payload["last_status"]["program"] is None
+    assert payload["last_status"]["program_raw"] == 5
+    assert payload["config"]["language"] is None

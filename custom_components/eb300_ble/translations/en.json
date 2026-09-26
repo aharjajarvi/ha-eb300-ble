@@ -37,7 +37,7 @@
     },
     "abort": {
       "already_configured": "This device is already configured",
-      "no_devices_found": "No EB300 devices found nearby",
+      "no_devices_found": "No unconfigured EB-Therm 300 is visible to Home Assistant's Bluetooth. Check that it is powered on and within range of a Bluetooth adapter or proxy, and that the Ebeco app on your phone is closed — the thermostat serves one connection at a time.",
       "reauth_successful": "The new key was accepted; the thermostat is reconnected.",
       "reconfigure_successful": "The new key was accepted; the thermostat is reconnected."
     }
@@ -49,6 +49,9 @@
           "poll_interval": "Poll interval (seconds)",
           "rated_watts": "Heating element wattage (0 disables the derived energy and power sensors)",
           "use_room_sensor": "Use the room sensor (instead of floor) as the climate entity's current temperature"
+        },
+        "data_description": {
+          "rated_watts": "Changing this later makes the Energy total jump once, at the moment of the change: it is the device's lifetime heating time multiplied by the current wattage. Past history is not rewritten; the README shows how to correct the jump in Developer tools → Statistics."
         }
       }
     }
@@ -159,7 +162,7 @@
     },
     "set_home_program": {
       "name": "Set home program",
-      "description": "Writes part or all of the weekly Home program schedule to the thermostat. Use Days + Events to apply one schedule to several weekdays at once, or the Per day section for days that differ. Omitted days are left unchanged; a day's remaining slots keep the device's existing times, marked inactive.",
+      "description": "Writes part or all of the weekly Home program schedule to the thermostat. Use Days + Events to apply one schedule to several weekdays at once, or the Per day section for days that differ. Omitted days are left unchanged. A day given fewer than 4 events keeps the device's remaining slots, marked inactive; any whose time would now come before your last event is moved up to it, so the day stays in order.",
       "fields": {
         "days": {
           "name": "Days",

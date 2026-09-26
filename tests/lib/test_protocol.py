@@ -12,12 +12,14 @@ from eb300_ble.protocol import (
     HomeProgramEvent,
     build_inner_message,
     decideg_to_s8,
+    home_program_event_minutes,
     pack_home_program,
     pack_thermostat_status,
     parse_inner_messages,
     s8_to_decideg,
     unpack_home_program,
     unpack_thermostat_status,
+    validate_home_program_day,
 )
 
 # ── C-1: golden vectors ──────────────────────────────────────────────────
@@ -336,3 +338,34 @@ def _valid_home_program_days() -> list[list[HomeProgramEvent]]:
         empty(),
     ]
     return [weekday.copy() for _ in range(5)] + [weekend.copy() for _ in range(2)]
+
+
+# ── Per-day validation: usable on a partial day, messages a person can act on ──
+
+
+def _ev(hour: int, minute: int = 0, temp: int = 200) -> HomeProgramEvent:
+    return HomeProgramEvent(active=True, hour=hour, minute=minute, temperature_decideg=temp)
+
+
+def test_the_schedule_day_starts_at_daybreak():
+    assert home_program_event_minutes(_ev(2)) == 0
+    assert home_program_event_minutes(_ev(23)) < home_program_event_minutes(_ev(1, 59))
+
+
+def test_a_partial_day_can_be_validated_on_its_own():
+    """The service checks just the events it was given, before any connection."""
+    validate_home_program_day([_ev(6), _ev(22)])
+    validate_home_program_day([])
+
+
+def test_an_order_violation_names_both_events_by_number_and_time():
+    with pytest.raises(ValidationError, match=r"event 1 \(22:00\) comes after event 2 \(06:00\)"):
+        validate_home_program_day([_ev(22), _ev(6)])
+
+
+def test_a_whole_program_error_names_the_weekday():
+    """"Day 5" meant Saturday only to someone who knew the device counts from Monday = 0."""
+    days = _valid_home_program_days()
+    days[5] = [_ev(6), _ev(23), _ev(22), _ev(23, 30)]
+    with pytest.raises(ValidationError, match=r"^Saturday: events must be in chronological order, but event 2 \(23:00\)"):
+        pack_home_program(days)

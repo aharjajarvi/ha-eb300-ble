@@ -19,7 +19,7 @@ Icon
 ----
 custom_components/eb300_ble/brand/icon.png and icon@2x.png are rendered from
 the "thermostat" glyph of Material Design Icons by Pictogrammers, used under
-the Pictogrammers Free License.
+the Pictogrammers Free License. The source SVG is docs/assets/icon.svg.
 
     https://pictogrammers.com/library/mdi/icon/thermostat/
     https://pictogrammers.com/docs/general/license/

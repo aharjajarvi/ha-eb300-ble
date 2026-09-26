@@ -1,5 +1,4 @@
 {
   "name": "Ebeco EB-Therm 300 (BLE)",
-  "homeassistant": "2026.8.0",
-  "render_readme": true
+  "homeassistant": "2026.8.0"
 }

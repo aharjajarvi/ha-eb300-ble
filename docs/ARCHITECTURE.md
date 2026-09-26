@@ -6,7 +6,8 @@
 Home Assistant
   │
   ├─ config_flow.py     discovery (manufacturer ID 0x0F93 / service UUID), PSK entry,
-  │                     validated with a real handshake before the entry is created;
+  │                     validated with a real handshake — over the coordinator's own
+  │                     connection path — before the entry is created;
   │                     reauth/reconfigure replace a rotated PSK on the existing entry
   │
   ├─ coordinator.py     EB300Coordinator (DataUpdateCoordinator)
@@ -65,7 +66,7 @@ Three mechanisms keep this bounded:
 
 | Mechanism | Value | Why |
 |---|---|---|
-| `_CONNECTION_SEMAPHORE` | 1, process-global | Multiple thermostats queue rather than race for slots. Stronger than a stagger-offset scheme, and makes one unnecessary. |
+| `_CONNECTION_SEMAPHORE` | 1, process-global | Multiple thermostats queue rather than race for slots — and so does the config flow's key validation, which connects through the same `async_run_once`. Stronger than a stagger-offset scheme, and makes one unnecessary. |
 | `CONNECT_RETRY_ATTEMPTS` | 2 | Measured ~6 % single-attempt connect-timeout rate on real hardware. One retry takes the compound failure rate to ~0.36 %. |
 | `BLE_OPERATION_TIMEOUT` | 45 s | Hard ceiling on one connect+operation. The only lever that actually bounds an unreachable device — see [HARDWARE_NOTES.md](HARDWARE_NOTES.md). |
 
@@ -84,14 +85,21 @@ The energy meter is taken from the field embedded in the `0x1004` status
 struct, not from PID `0x1020` — that PID returns `NOT_IMPLEMENTED` on at least
 one observed firmware, while the struct field is part of every poll anyway.
 
+A key lock, language, screensaver or program value with no name in this
+integration (a newer firmware's, say) decodes to `None`: that one entity reads
+`unknown`, a warning is logged once, and the poll succeeds. A *malformed*
+payload — empty, or too short — is a `ProtocolError` and fails the poll.
+
 ## Writes
 
 All writes funnel through the coordinator, which:
 
 - wraps failures in `HomeAssistantError` at the write boundary, so a failing
   service call shows the user a readable message instead of a traceback;
-- refreshes immediately after a successful write, so state reflects the device
-  rather than an assumption;
+- polls again `POST_WRITE_SETTLE_SECONDS` (3 s) after a successful write, so
+  state reflects the device rather than an assumption — not immediately,
+  because a read made straight after a SET still returns the pre-write state
+  ([HARDWARE_NOTES.md](HARDWARE_NOTES.md));
 - normalizes `BleakError` and bare `TimeoutError` into the integration's own
   exception types.
 
@@ -112,7 +120,15 @@ than a device write.
 
 So it is exposed as two domain-level services, `get_home_program` and
 `set_home_program`, with `get`'s output deliberately shaped to be valid `set`
-input.
+input. They are registered once, in `async_setup`, so they exist even while no
+thermostat is loaded — a call then fails with "not loaded" rather than "action
+not found".
+
+`set_home_program` checks everything it can on the given events alone —
+temperatures and chronological order — before connecting. A day given fewer
+than 4 events is padded from the device's existing slots (inactive), with any
+existing time that would fall before the slot ahead of it moved up to that
+slot's time; the padding therefore never makes a valid edit fail.
 
 Being **domain-level** rather than entity services has one consequence worth
 knowing: HA does not run entity-platform target expansion for them, so a raw
@@ -132,7 +148,7 @@ Two, deliberately separate:
 | `homeassistant` installed | **No** | Yes, version-pinned |
 | Python | 3.12+ | 3.14+ (whatever HA needs) |
 | Device double | `fakes.py::FakeEB300` | HA test harness |
-| Count | 103 | 129 |
+| Count | 112 | 327 |
 
 They cannot merge. The library suite's value is precisely that it proves the
 protocol code works with HA absent. The HA suite's value is precisely that it
