@@ -18,7 +18,7 @@ sync), and weekly schedule read/write via services.
 | `custom_components/eb300_ble/` | The integration. **The only thing HACS ships.** |
 | `custom_components/eb300_ble/eb300_ble/` | The protocol library. **The only copy of it.** |
 | `tests/lib/` | Library suite, 108 tests, no `homeassistant` dependency |
-| `tests/ha/` | HA-glue suite, 290 tests, pinned `homeassistant` |
+| `tests/ha/` | HA-glue suite, 296 tests, pinned `homeassistant` |
 | `tools/` | Hardware bring-up CLIs — need a real device |
 | `docs/` | ARCHITECTURE, PROTOCOL, HARDWARE_NOTES, DEVELOPMENT |
 
@@ -62,7 +62,7 @@ uv run --project tests/lib ruff check .
 uv run --project tests/lib mypy
 ```
 
-398 tests, all four clean. None of them need hardware.
+404 tests, all four clean. None of them need hardware.
 
 Coverage is worth checking before believing a path is tested — `./tests/ha/run.sh
 --cov=eb300_ble --cov-report=term-missing`. Everything under
@@ -104,7 +104,7 @@ The private development history behind this repo was a long, honest engineering
 log: every hardware finding written down, including the ones that contradicted
 an earlier assumption, and explicit "this is not verified" notes where evidence
 was weaker than it looked. That is why `docs/HARDWARE_NOTES.md` can state
-firmware behaviour with confidence and can also say plainly which two gaps
+firmware behaviour with confidence and can also say plainly which gaps
 remain untested.
 
 Worth continuing. When a test passes for a reason you did not predict, say so

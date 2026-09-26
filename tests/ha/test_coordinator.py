@@ -17,12 +17,13 @@ are matched up with their responses positionally, which is the kind of thing
 that breaks silently and reads fine.
 """
 import struct
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from conftest import ADDRESS, PSK_B64, make_status
 from eb300_ble.config_flow import CONF_ADDRESS
-from eb300_ble.const import CONF_PSK, CONNECT_RETRY_ATTEMPTS, DOMAIN, WEEKDAYS
+from eb300_ble.const import CONF_PSK, CONNECT_RETRY_ATTEMPTS, DOMAIN, POST_WRITE_SETTLE_SECONDS, WEEKDAYS
 from eb300_ble.coordinator import EB300Coordinator, merge_home_program
 from eb300_ble.eb300_ble.const import (
     PID,
@@ -43,7 +44,8 @@ from eb300_ble.eb300_ble.exceptions import (
 from eb300_ble.eb300_ble.models import DeviceInfo, HomeProgram
 from eb300_ble.eb300_ble.protocol import HomeProgramEvent
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 
 def _coordinator(hass):
@@ -130,16 +132,50 @@ async def test_calibration_goes_through_the_boundary_too(hass):
         await coordinator.async_set_calibration(room_decideg=10, floor_decideg=0)
 
 
-async def test_a_successful_write_asks_for_a_fresh_poll(hass):
-    """Without this the UI shows the old value until the next scheduled poll."""
+def _writing_client():
+    client = MagicMock()
+    for setter in ("set_power", "set_program", "set_override_temp", "set_manual_temp", "set_key_lock"):
+        setattr(client, setter, AsyncMock())
+    return client
+
+
+def _after_settle(hass):
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=POST_WRITE_SETTLE_SECONDS + 1))
+
+
+@pytest.mark.parametrize(
+    "method, args",
+    [
+        ("async_set_program", (Program.HOME,)),
+        ("async_set_power", (True,)),
+        ("async_set_override_temp", (215,)),
+        ("async_set_manual_temp", (215,)),
+        ("async_set_key_lock", (True,)),
+    ],
+)
+async def test_a_successful_write_polls_once_after_the_device_settles(hass, method, args):
+    """Without the poll the UI shows the old value until the next scheduled one.
+
+    Not immediately: a status read right after a SET returned the pre-write
+    setpoint or program 5 times out of 5 on hardware (2026-09-26), and the
+    entity then showed that stale value for a whole poll interval."""
     coordinator = _coordinator(hass)
     with (
-        patch.object(EB300Coordinator, "_with_client", AsyncMock()),
-        patch.object(EB300Coordinator, "async_request_refresh", AsyncMock()) as refresh,
+        patch.object(EB300Coordinator, "_with_client", _with_client_running(_writing_client())),
+        patch.object(EB300Coordinator, "async_refresh", AsyncMock()) as refresh,
+        patch.object(EB300Coordinator, "async_request_refresh", AsyncMock()) as debounced,
     ):
-        await coordinator.async_set_power(True)
+        await getattr(coordinator, method)(*args)
+        await hass.async_block_till_done()
+        refresh.assert_not_awaited()
+
+        _after_settle(hass)
+        await hass.async_block_till_done()
 
     refresh.assert_awaited_once()
+    # The debounced path's 10 s cooldown deferred a second edit's refresh.
+    debounced.assert_not_awaited()
+    await coordinator.async_shutdown()
 
 
 async def test_a_failed_write_does_not_ask_for_a_poll(hass):
@@ -147,10 +183,43 @@ async def test_a_failed_write_does_not_ask_for_a_poll(hass):
     coordinator = _coordinator(hass)
     with (
         patch.object(EB300Coordinator, "_with_client", side_effect=EB300Error("nope")),
-        patch.object(EB300Coordinator, "async_request_refresh", AsyncMock()) as refresh,
+        patch.object(EB300Coordinator, "async_refresh", AsyncMock()) as refresh,
         pytest.raises(HomeAssistantError),
     ):
         await coordinator.async_set_power(True)
+    _after_settle(hass)
+    await hass.async_block_till_done()
+
+    refresh.assert_not_awaited()
+
+
+async def test_back_to_back_writes_share_one_settle_poll(hass):
+    """Each settle poll is a BLE connection; a second write restarts the wait
+    rather than queueing a second one behind the first."""
+    coordinator = _coordinator(hass)
+    with (
+        patch.object(EB300Coordinator, "_with_client", _with_client_running(_writing_client())),
+        patch.object(EB300Coordinator, "async_refresh", AsyncMock()) as refresh,
+    ):
+        await coordinator.async_set_program(Program.MANUAL)
+        await coordinator.async_set_override_temp(215)
+        _after_settle(hass)
+        await hass.async_block_till_done()
+
+    refresh.assert_awaited_once()
+
+
+async def test_shutdown_cancels_a_pending_settle_poll(hass):
+    """Otherwise an unloaded entry connects to the device one last time."""
+    coordinator = _coordinator(hass)
+    with (
+        patch.object(EB300Coordinator, "_with_client", _with_client_running(_writing_client())),
+        patch.object(EB300Coordinator, "async_refresh", AsyncMock()) as refresh,
+    ):
+        await coordinator.async_set_program(Program.MANUAL)
+        await coordinator.async_shutdown()
+        _after_settle(hass)
+        await hass.async_block_till_done()
 
     refresh.assert_not_awaited()
 

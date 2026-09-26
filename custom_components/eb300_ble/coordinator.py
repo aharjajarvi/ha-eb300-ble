@@ -12,8 +12,9 @@ from typing import Any, TypeVar
 
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -22,6 +23,7 @@ from .const import (
     CONNECT_RETRY_ATTEMPTS,
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_SCAN_TIMEOUT,
+    POST_WRITE_SETTLE_SECONDS,
     WEEKDAYS,
 )
 from .eb300_ble.client import BleakTransport, EB300Client
@@ -81,6 +83,11 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
         # read once on the first successful poll and cached, not re-fetched
         # every cycle.
         self._device_info: EB300DeviceInfo | None = None
+        self._unsub_settle_refresh: CALLBACK_TYPE | None = None
+
+    async def async_shutdown(self) -> None:
+        self._cancel_settle_refresh()
+        await super().async_shutdown()
 
     async def _async_update_data(self) -> EB300Data:
         try:
@@ -136,9 +143,10 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
 
     # ── Writes ────────────────────────────────────────────────────────────
     #
-    # Every setter connects, performs the SET, disconnects, then requests a
-    # fresh poll — so entities reflect the change within one connection cycle
-    # instead of waiting up to `poll_interval` for the next scheduled one.
+    # Every setter connects, performs the SET, disconnects, then polls once
+    # more POST_WRITE_SETTLE_SECONDS later — so entities reflect the change
+    # within seconds instead of waiting up to `poll_interval` for the next
+    # scheduled poll. See `_write` for why the poll is delayed.
 
     async def async_set_power(self, on: bool) -> None:
         await self._write(lambda client: client.set_power(on))
@@ -217,6 +225,12 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
         await self.async_request_refresh()
 
     async def _write(self, op: Callable[[EB300Client], Awaitable[None]]) -> None:
+        """SET, then poll once POST_WRITE_SETTLE_SECONDS later.
+
+        Not an immediate refresh: a status read right after a SET returns the
+        pre-write state (see the constant for the evidence), so the entity
+        showed the old value until the next scheduled poll.
+        """
         # Translate library errors to HomeAssistantError here, once, rather
         # than in each of the seven entity write methods. HA treats any other
         # exception escaping a service call as an integration bug and logs a
@@ -234,7 +248,26 @@ class EB300Coordinator(DataUpdateCoordinator[EB300Data]):
             ) from exc
         except EB300Error as exc:
             raise HomeAssistantError(f"Could not write to {self.address}: {exc}") from exc
-        await self.async_request_refresh()
+        self._schedule_settle_refresh()
+
+    def _schedule_settle_refresh(self) -> None:
+        # One pending settle poll at most: a later write restarts the wait
+        # rather than stacking a second connection behind the first.
+        self._cancel_settle_refresh()
+
+        async def _settle_refresh(_now: Any) -> None:
+            self._unsub_settle_refresh = None
+            # async_refresh, not async_request_refresh: the latter goes through
+            # HA's refresh debouncer, whose 10 s cooldown deferred the refresh
+            # of a second edit made shortly after a first one.
+            await self.async_refresh()
+
+        self._unsub_settle_refresh = async_call_later(self.hass, POST_WRITE_SETTLE_SECONDS, _settle_refresh)
+
+    def _cancel_settle_refresh(self) -> None:
+        if self._unsub_settle_refresh is not None:
+            self._unsub_settle_refresh()
+            self._unsub_settle_refresh = None
 
     # ── Shared connect/retry plumbing ────────────────────────────────────
 

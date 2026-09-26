@@ -73,6 +73,15 @@ CONF_USE_ROOM_SENSOR = "use_room_sensor"
 # coalesce them into one BLE write, sent this long after the last one.
 CLIMATE_SET_TEMPERATURE_DEBOUNCE_SECONDS = 1.0
 
+# After any write, poll once more this long after the write returns, instead of
+# refreshing immediately. The device does not report a SET straight away: on
+# 2026-09-26 a status read over the write's own connection returned the
+# pre-write setpoint/program 5 times out of 5, while a poll 5 s later showed
+# the new value every time (docs/HARDWARE_NOTES.md). 3 s then showed the new
+# value on the first poll for 11 of 11 writes across both firmware 1.2 and 1.3.
+# Confirmed to work, not measured as a minimum.
+POST_WRITE_SETTLE_SECONDS = 3.0
+
 # Home program services. Index 0 = Monday, matching the
 # device's own day ordering in the 0x10C0 struct.
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")

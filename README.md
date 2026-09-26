@@ -11,13 +11,14 @@
 > What that does *not* mean: it is not untested or unverified. Every feature
 > here was exercised against a real EB-Therm 300 — including the write paths,
 > run attended with device state snapshotted and restored — and the repo
-> carries 398 automated tests that run without hardware.
+> carries 404 automated tests that run without hardware.
 >
-> What it does mean: it has been validated on exactly **one** device
-> (firmware 1.2, batch 2603) by **one** person, and no third party has
-> reviewed the code. It controls a heating system in your home. Read
+> What it does mean: it has been validated by **one** person, on **two**
+> devices in one house — the reference device (firmware 1.2, batch 2603), on
+> which every write path was tested attended, and a second one (firmware 1.3,
+> batch 2606) in everyday use — and no third party has reviewed the code. It controls a heating system in your home. Read
 > [`docs/HARDWARE_NOTES.md`](docs/HARDWARE_NOTES.md) — including its
-> *"Two known gaps, stated honestly"* section — and satisfy yourself before
+> *"Known gaps, stated honestly"* section — and satisfy yourself before
 > pointing automations at it.
 
 Local Bluetooth control of the **Ebeco EB-Therm 300** underfloor heating
@@ -252,8 +253,9 @@ actions:
 Every poll and every write is a full BLE connect. A Bluetooth proxy has only a
 few connection slots, shared with **every** BLE device in the house — not just
 this one. Dropping the poll interval from 300 s to 60 s is a 5× increase in
-connection attempts. That is fine for a single thermostat, but worth
-remembering before adding a second one or a pile of other BLE devices.
+connection attempts. Two thermostats at a 120 s poll interval run without
+problems on the author's instance; beyond that, keep it in mind before adding
+more thermostats or a pile of other BLE devices.
 
 The integration serializes its own connections so multiple thermostats never
 contend with each other, and it caps any single operation at 45 seconds so an
@@ -405,7 +407,7 @@ commands, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit,
 protocol, and [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md) for firmware
 behaviour found on real hardware.
 
-Two test suites, 398 tests, no thermostat required:
+Two test suites, 404 tests, no thermostat required:
 
 ```sh
 ./tests/lib/run.sh      # library: protocol, crypto, advertisements, client

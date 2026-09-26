@@ -24,7 +24,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#why-the-library-is-vendored).
 
 ```sh
 ./tests/lib/run.sh          # 108 tests, ~0.2s, no HA, no radio
-./tests/ha/run.sh           # 290 tests, needs the pinned homeassistant package
+./tests/ha/run.sh           # 296 tests, needs the pinned homeassistant package
 ```
 
 Both accept pytest arguments: `./tests/lib/run.sh -k crypto -v`, including

@@ -4,6 +4,10 @@ Behaviour found by running this integration against a real EB-Therm 300, that
 the protocol specification does not describe. Reference device: **firmware 1.2,
 batch 2603**.
 
+A second device (**firmware 1.3, batch 2606**) has run in everyday use since
+2026-09 with no behaviour differing from the reference device observed. The
+attended write-path tests below were run on the reference device only.
+
 Nothing here is a bug in this integration. It is the list of things that cost
 real debugging time, kept so the next person does not have to pay for them
 again.
@@ -193,6 +197,13 @@ house. Going from a 300 s to a 60 s poll interval is a 5× increase in
 connection attempts per hour. Fine for one thermostat; think again before
 adding a second, or a pile of other BLE devices.
 
+*Update (2026-09-26):* two thermostats have since run side by side on the
+reference instance (HA 2026.9.3, both at a 120 s poll interval, two proxies)
+without errors. Each poll cycle completes in about 1 s; the process-global
+connection semaphore means the two never hold a slot at the same time. That is
+two devices on one house's radio environment — evidence that a second
+thermostat works, not a general capacity figure.
+
 ---
 
 ## Write-path design rules
@@ -245,7 +256,7 @@ change this code, change it knowing why it looks the way it does.
 Result after these four: zero thread-safety warnings, setpoint reverts to truth
 in ~1.0 s, no unhandled tracebacks, no stale write landing after a reconnect.
 
-### Two known gaps, stated honestly
+### Known gaps, stated honestly
 
 - **Burst cancellation is not hardware-verified.** Three rapid edits inside the
   debounce window are covered by `tests/ha/test_climate_write_path.py`, as is a
@@ -261,6 +272,32 @@ in ~1.0 s, no unhandled tracebacks, no stale write landing after a reconnect.
   observed ~4-minute lag before a device shows as unavailable to roughly 2.
   Deliberately not implemented — it trades a faster unavailable signal for more
   UI flapping on transient failures, and that trade has not been made.
+
+- **A SET is not visible in a status read made straight after it.**
+  Reported 2026-09-26: after a mode change the target temperature sometimes
+  stayed stale until the next scheduled poll. Tested the same day with a
+  build that read status back over the write's own connection: that read
+  returned the *pre-write* program or setpoint 5 times out of 5 (three
+  Home <-> Manual switches, two setpoint edits), and a poll 5 s later showed
+  the new value every time. Under the earlier code, a refresh on a *new*
+  connection about 1.7 s after a setpoint write did see the new value — so
+  the device applies a SET on disconnect or within roughly a second, not
+  instantly. Which of the two has not been separated.
+
+  `_write` therefore polls once `POST_WRITE_SETTLE_SECONDS` after every
+  successful write, and not immediately. It started at 5 s, which worked for
+  both setpoint and mode changes, and was then shortened to 3 s. The 3 s build
+  was tested the same day on both devices (firmware 1.2 and 1.3): 6 Home <->
+  Manual switches and 5 setpoint edits, every one showing the new value on
+  the first settle poll. 3 s is confirmed to work; it is not a measured
+  minimum. The poll uses `async_refresh`, not
+  `async_request_refresh`: the latter goes through HA's refresh debouncer,
+  whose 10 s cooldown deferred a second edit's refresh (seen at 11:21 the
+  same day: the setpoint showed 21 for 6 s after the user set 20).
+
+  Side effect: the climate entity drops its optimistic setpoint when the
+  write starts (`climate.py`, `_debounce_and_write`), so the card shows the old value for about 3 s
+  before the settle poll corrects it.
 
 ---
 
