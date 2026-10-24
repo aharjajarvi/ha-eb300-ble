@@ -2,31 +2,21 @@
 
 [![Validate](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/validate.yml/badge.svg)](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/validate.yml)
 [![Tests](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/tests.yml/badge.svg)](https://github.com/aharjajarvi/ha-eb300-ble/actions/workflows/tests.yml)
-[![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
+[![hacs](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz)
 
 > [!NOTE]
-> **Built with AI assistance.** This integration was written largely by an AI
-> coding assistant (Claude), directed and reviewed by a human maintainer.
->
-> What that does *not* mean: it is not untested or unverified. Every feature
-> here was exercised against a real EB-Therm 300 — including the write paths,
-> run attended with device state snapshotted and restored — and the repo
-> carries 439 automated tests that run without hardware.
->
-> What it does mean: it has been validated by **one** person, on **two**
-> devices in one house — the reference device (firmware 1.2, batch 2603), on
-> which every write path was tested attended, and a second one (firmware 1.3,
-> batch 2606) in everyday use — and no third party has reviewed the code. It controls a heating system in your home. Read
-> [`docs/HARDWARE_NOTES.md`](docs/HARDWARE_NOTES.md) — including its
-> *"Known gaps, stated honestly"* section — and satisfy yourself before
+> **Built with AI assistance.** Written largely by an AI coding assistant
+> (Claude), directed and reviewed by one human maintainer. Every feature was
+> tested on a real EB-Therm 300 and there are 439 automated tests, but it has
+> only been validated in one house, on two devices (firmware 1.2 and 1.3), and
+> no third party has reviewed the code. It controls your heating: read the
+> known gaps in [`docs/HARDWARE_NOTES.md`](docs/HARDWARE_NOTES.md) before
 > pointing automations at it.
 
 Local Bluetooth control of the **Ebeco EB-Therm 300** underfloor heating
-thermostat, over Ebeco's own Open Local API. No cloud, no account, no polling
-of Ebeco's servers — Home Assistant talks straight to the thermostat over an
-encrypted BLE session.
-
-Everything runs locally: `iot_class` is `local_polling`.
+thermostat, over Ebeco's own Open Local API. No cloud and no account: Home
+Assistant talks straight to the thermostat over an encrypted BLE session
+(`iot_class: local_polling`).
 
 ---
 
@@ -38,9 +28,6 @@ yourself in the Ebeco Connect app, and Ebeco emails you the key:
 > **Ebeco Connect → your device → Settings → Functions → Enable local API**
 >
 > The key arrives by email, at the address on your Ebeco account.
-
-That is the whole process — no support ticket, no waiting on Ebeco to
-provision anything by hand.
 
 Two things worth knowing:
 
@@ -79,10 +66,6 @@ fails during setup rather than silently later.
 
 1. In HACS, search for **Ebeco EB-Therm 300 (BLE)**.
 2. Download it, then restart Home Assistant.
-
-If it does not show up in the search yet, add it as a custom repository first:
-HACS → three-dot menu → **Custom repositories**, repository
-`https://github.com/aharjajarvi/ha-eb300-ble`, category **Integration**.
 
 ### Manual
 
@@ -173,8 +156,8 @@ two services rather than as entities.
 
 ### `eb300_ble.get_home_program`
 
-Returns the current schedule. Its output is deliberately shaped so it can be
-pasted straight back into `set_home_program`.
+Returns the current schedule. Its output can be pasted straight back into
+`set_home_program`.
 
 ```yaml
 action: eb300_ble.get_home_program
@@ -190,8 +173,7 @@ Two ways in, both optional and combinable:
   This is what most real edits look like.
 - **per-weekday fields** (`monday`, `tuesday`, …) — for days that differ.
 
-A day may not be named both ways in one call; the service rejects that rather
-than silently picking a winner.
+A day may not be named both ways in one call; the service rejects that.
 
 ```yaml
 action: eb300_ble.set_home_program
@@ -225,20 +207,15 @@ Two rules the device enforces, and so does this integration:
     - { time: "23:30", temperature: 17.0, active: false }
 ```
 
-In the UI's event editor each row shows all three fields —
-`23:00:00 · 17 °C · false` — so a slot that has been switched off is visible
-without opening it. A row with no flag shown is active; that is the default
-when the key is omitted.
+`active` defaults to `true` when omitted.
 
 The schedule day runs from **02:00 to 01:59**, so an event at 01:00 counts as
 coming after one at 23:00.
 
-A day given fewer than four events keeps the device's remaining slots, switched
-off, with their temperatures. If one of their times would now come before your
-last event, it is moved up to that event's time so the day stays in order —
-so the `saturday` example above is accepted whatever the thermostat held
-before. Events you give out of order are refused before anything is sent to the
-thermostat, with a message naming the day and the two events.
+If you give a day fewer than four events, the device's remaining slots are kept
+but switched off, and any of their times that would now be out of order is
+moved up to your last event's time. Events you give out of order are refused
+before anything is sent, with a message naming the day and the two events.
 
 Setting the schedule does **not** switch the thermostat into the Home program —
 change the `climate` entity's preset to `home` for that.
@@ -303,14 +280,9 @@ wattage you entered, multiplied by what the relay is doing:
 | `Power` (W) | the relay's state **at poll time** | A burst of heating that falls between two polls is invisible; one that spans a poll reads as if it ran the whole interval. |
 | `Energy` (kWh) | the device's own cumulative **relay-on minute counter** | Misses nothing — the counter runs on the thermostat, so the poll interval does not matter. |
 
-So `Power` is for seeing what the floor is doing right now, and `Energy` is
-what you point the energy dashboard at. Reading totals off the power sensor
-instead will undercount or overcount, depending on the poll interval.
-
-Both assume the element draws its rated wattage whenever the relay is closed,
-which is what a resistive heating cable does. Neither reacts to mains voltage,
-and an inaccurate wattage propagates straight through. If you want measured
-figures, a smart plug or an energy meter on the circuit is the answer.
+Point the energy dashboard at `Energy`, not `Power`. Both assume the element
+draws its rated wattage whenever the relay is closed; for measured figures, put
+an energy meter on the circuit.
 
 #### Changing the wattage later
 
@@ -325,19 +297,11 @@ use *Adjust sum* on the hour the wattage changed to remove the spike.
 
 ### No floor sensor installed: the floor reading goes `unknown`
 
-Running the thermostat on its room sensor alone, with nothing wired to the
-floor-sensor terminals, is a supported installation — set the control method to
-the room sensor in the Ebeco app and the app stops reporting an error.
-
-The thermostat still sends a floor temperature in that state, and **it is a
-placeholder: a constant 20.0 °C**. It is not a measurement, and 20.0 °C is
-plausible enough to be believed — on the tested firmware the reading snapped
-from 25.7 °C to exactly 20.0 °C the moment the sensor was disconnected, and
-stayed there.
-
-This integration suppresses it. When the thermostat reports an error for a
-sensor, that sensor's entity is `unknown` rather than a fabricated number, so
-nothing fake reaches history, statistics or your automations:
+Running the thermostat on its room sensor alone is a supported installation.
+The thermostat still sends a floor temperature then, but it is a placeholder:
+a constant 20.0 °C ([evidence](docs/HARDWARE_NOTES.md)). When the device reports
+a sensor error, this integration shows that sensor as `unknown` instead, so the
+fake value never reaches history or automations:
 
 | Entity | With a working floor sensor | With none wired |
 |---|---|---|
@@ -345,12 +309,9 @@ nothing fake reaches history, statistics or your automations:
 | `binary_sensor.…_floor_sensor_fault` | `off` | `on` |
 | `climate.…` current temperature | the floor reading | `unknown`, **unless** you turn on *Use room sensor for climate* |
 
-So on a room-sensor-only installation, turn on **Use room sensor for climate**
-in the integration options — otherwise the thermostat card has no current
-temperature to show. The `Floor sensor fault` binary sensor staying `on` is
-correct and expected there; the exact code the device reports is in the
-diagnostics download if you want to tell a disconnected sensor from a broken
-one.
+So with no floor sensor, turn on **Use room sensor for climate** in the
+options. `Floor sensor fault` staying `on` is expected; the device's exact
+error code is in the diagnostics download.
 
 ### The display does not show the setpoint
 
@@ -375,45 +336,27 @@ into the prompt, or [Reconfigure](#if-the-key-changes) the entry yourself.
 Nothing is lost.
 
 **Setup fails with "Could not connect."**
-The device is out of range or powered off. Note that the thermostat advertises
-continuously while powered — it does *not* need the Ebeco app to be open, and
-it does not sleep its radio. If nothing sees it, it is a range or adapter
-problem. (The reverse *does* bite — see the next entry.)
+Check that the Ebeco app is closed (see below). Otherwise the device is out of
+range or powered off: it advertises continuously while powered, so if nothing
+sees it, it is a range or adapter problem.
 
 > [!IMPORTANT]
 > **Close the Ebeco app properly, or Home Assistant cannot reach the thermostat.**
 >
-> While the Ebeco Connect app on your phone is connected to the thermostat,
-> every Home Assistant poll fails and the entities go unavailable — often for
-> minutes at a stretch, coming back only when the app lets go. The thermostat
-> appears to serve **one Bluetooth connection at a time**, and the app is
-> holding it.
+> The thermostat serves one Bluetooth connection at a time. While the Ebeco
+> Connect app holds it, every poll fails and the entities go unavailable, even
+> though the device still shows up in scans. If the **Bluetooth glyph on the
+> thermostat is lit**, something (the app) is connected.
 >
-> It looks like a range problem and is not. The device keeps advertising while
-> the app is connected, so it is still discovered and still shows up in scans.
-> Only the *connect* fails.
->
-> | Look at the thermostat | What it means |
-> |---|---|
-> | Bluetooth glyph **lit** | Something is connected right now — that is the app, not HA |
-> | Bluetooth glyph **off** | The link is free; the next poll will land |
->
-> **Backgrounding the app is not closing it.** Locking the phone, switching
-> apps, or leaving the app on screen with the phone in your pocket all keep the
-> connection open. Swipe the app out of the app switcher (or force-stop it),
-> confirm the glyph on the thermostat goes out, and Home Assistant recovers on
-> its next poll — up to one poll interval, 5 minutes by default. Reloading the
-> integration polls straight away if you would rather not wait.
->
-> Being in and out of the app while debugging something in Home Assistant is
-> exactly the situation that produces this, and it is easy to blame the
-> integration for it.
+> Backgrounding the app or locking the phone does not release the connection.
+> Swipe the app out of the app switcher or force-stop it; Home Assistant
+> recovers on its next poll, or straight away if you reload the integration.
 
 **The device is never discovered, or setup says no thermostat is visible.**
-Confirm HA's Bluetooth integration is loaded and an adapter or proxy is in
-range, and that the Ebeco app is closed (see above). `tools/scan.py` (clone
-the repository to run it) can confirm the device is advertising and whether
-bit 5 (Open API PSK provisioned) is set.
+Check that HA's Bluetooth integration is loaded, an adapter or proxy is in
+range, and the Ebeco app is closed. `tools/scan.py` (clone the repository to
+run it) shows whether the device is advertising and has the PSK provisioned
+(bit 5).
 
 **An entity shows `unknown` and the log mentions a value it "does not recognise".**
 The thermostat reported a setting — a display language, say — that this
@@ -421,10 +364,9 @@ integration has no name for yet, probably from newer firmware. Only that entity
 is affected. Please open an issue with the log line and your firmware version.
 
 **Entities go unavailable, then come back.**
-Expected if the device is briefly out of reach. A failed poll does not
-immediately mark the device unavailable; it takes a few cycles. If it keeps
-happening, check whether the Ebeco app is open on a phone in the house — that
-is the common cause, and the Bluetooth glyph on the thermostat tells you.
+Expected if the device is briefly out of reach; it takes a few failed polls to
+mark it unavailable. If it keeps happening, the usual cause is the Ebeco app
+being open on a phone (see above).
 
 **Filing a bug.** Include the diagnostics download from the device page — the
 PSK, the device address and the serial are redacted automatically — plus your
